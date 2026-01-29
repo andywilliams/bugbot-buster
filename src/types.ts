@@ -30,10 +30,13 @@ export interface RunRecord {
   commitSha?: string;
 }
 
+export type AIProvider = 'codex' | 'claude';
+
 export interface BusterOptions {
   pr: string;
   interval: number;
   maxRuns: number;
   dryRun: boolean;
   verbose: boolean;
+  provider: AIProvider;
 }

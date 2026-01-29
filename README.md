@@ -1,12 +1,12 @@
 # 🤖 Bugbot Buster
 
-Automated PR review comment fixer using OpenAI Codex CLI.
+Automated PR review comment fixer using AI coding assistants.
 
 ## What it does
 
 1. Takes a GitHub PR as input
 2. Fetches all unresolved review comments
-3. Uses Codex CLI to fix the issues
+3. Uses AI (Codex or Claude) to fix the issues
 4. Commits and pushes the fixes
 5. Waits, then checks for new comments
 6. Repeats until all comments are addressed
@@ -15,7 +15,9 @@ Automated PR review comment fixer using OpenAI Codex CLI.
 
 - Node.js 18+
 - GitHub CLI (`gh`) installed and authenticated
-- OpenAI Codex CLI (`codex`) installed and logged in
+- One of:
+  - OpenAI Codex CLI (`codex`) installed and logged in
+  - Claude Code CLI (`claude`) installed
 - Must be run from within a git repository
 
 ## Installation
@@ -33,8 +35,11 @@ npx bugbot-buster --pr owner/repo#123
 ## Usage
 
 ```bash
-# Fix comments on a PR (from within the repo)
+# Fix comments on a PR using Codex (default)
 bugbot-buster --pr #123
+
+# Use Claude Code instead of Codex
+bugbot-buster --pr #123 --ai claude
 
 # Full repo/PR path
 bugbot-buster --pr andywilliams/dwlf-indicators#26
@@ -54,6 +59,7 @@ bugbot-buster --pr #123 --verbose
 | Option | Description | Default |
 |--------|-------------|---------|
 | `-p, --pr <pr>` | PR to fix (required) | - |
+| `-a, --ai <provider>` | AI provider: `codex` or `claude` | codex |
 | `-i, --interval <min>` | Minutes between checks | 5 |
 | `-m, --max-runs <n>` | Maximum number of runs | 10 |
 | `-d, --dry-run` | Preview without changes | false |

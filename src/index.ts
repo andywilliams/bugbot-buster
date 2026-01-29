@@ -3,7 +3,7 @@ import { program } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
 import { parsePR, fetchPRComments, checkoutPR, commitAndPush } from './github.js';
-import { buildPrompt, runCodex, checkCodexAuth } from './codex.js';
+import { buildPrompt, runAI, checkAuth, getProviderName } from './ai.js';
 import {
   loadState,
   saveState,
@@ -11,20 +11,22 @@ import {
   addRunRecord,
   filterUnaddressed,
 } from './tracker.js';
-import type { BusterOptions, PRComment } from './types.js';
+import type { BusterOptions, PRComment, AIProvider } from './types.js';
 
 async function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function run(options: BusterOptions): Promise<void> {
-  const { pr, interval, maxRuns, dryRun, verbose } = options;
+  const { pr, interval, maxRuns, dryRun, verbose, provider } = options;
 
   console.log(chalk.bold('\n🤖 Bugbot Buster\n'));
+  console.log(chalk.dim(`Using: ${getProviderName(provider)}\n`));
 
-  // Check Codex auth
-  if (!checkCodexAuth()) {
-    console.error(chalk.red('❌ Codex CLI not logged in. Run: codex login'));
+  // Check AI provider auth
+  if (!checkAuth(provider)) {
+    const loginCmd = provider === 'codex' ? 'codex login' : 'claude (install from npm)';
+    console.error(chalk.red(`❌ ${getProviderName(provider)} not available. Run: ${loginCmd}`));
     process.exit(1);
   }
 
@@ -115,16 +117,16 @@ async function run(options: BusterOptions): Promise<void> {
       break;
     }
 
-    // Run Codex
+    // Run AI to fix issues
     const prompt = buildPrompt(unaddressed);
-    spinner.start('Running Codex to fix issues...');
-    const success = await runCodex(prompt, workdir, verbose);
+    spinner.start(`Running ${getProviderName(provider)} to fix issues...`);
+    const success = await runAI(provider, prompt, workdir, verbose);
 
     if (!success) {
-      spinner.fail('Codex failed to fix issues');
+      spinner.fail(`${getProviderName(provider)} failed to fix issues`);
       break;
     }
-    spinner.succeed('Codex completed');
+    spinner.succeed(`${getProviderName(provider)} completed`);
 
     // Commit and push
     spinner.start('Committing and pushing...');
@@ -166,20 +168,27 @@ async function run(options: BusterOptions): Promise<void> {
 // CLI setup
 program
   .name('bugbot-buster')
-  .description('Automated PR review comment fixer using Codex CLI')
+  .description('Automated PR review comment fixer using AI coding assistants')
   .version('0.1.0')
   .requiredOption('-p, --pr <pr>', 'PR to fix (owner/repo#123 or #123)')
+  .option('-a, --ai <provider>', 'AI provider: codex or claude', 'codex')
   .option('-i, --interval <minutes>', 'Minutes between checks', '5')
   .option('-m, --max-runs <count>', 'Maximum number of runs', '10')
   .option('-d, --dry-run', 'Show what would be done without making changes')
   .option('-v, --verbose', 'Show detailed output')
   .action((opts) => {
+    const provider = opts.ai as AIProvider;
+    if (provider !== 'codex' && provider !== 'claude') {
+      console.error(chalk.red(`Invalid AI provider: ${opts.ai}. Use 'codex' or 'claude'`));
+      process.exit(1);
+    }
     run({
       pr: opts.pr,
       interval: parseInt(opts.interval, 10),
       maxRuns: parseInt(opts.maxRuns, 10),
       dryRun: opts.dryRun ?? false,
       verbose: opts.verbose ?? false,
+      provider,
     }).catch((error) => {
       console.error(chalk.red('Fatal error:'), error);
       process.exit(1);
