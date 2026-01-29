@@ -52,6 +52,9 @@ bugbot-buster --pr #123 --dry-run
 
 # Verbose output
 bugbot-buster --pr #123 --verbose
+
+# Sign commits with GPG (for repos requiring signed commits)
+bugbot-buster --pr #123 --sign
 ```
 
 ## Options
@@ -64,6 +67,7 @@ bugbot-buster --pr #123 --verbose
 | `-m, --max-runs <n>` | Maximum number of runs | 10 |
 | `-d, --dry-run` | Preview without changes | false |
 | `-v, --verbose` | Detailed output | false |
+| `-s, --sign` | Sign commits with GPG | false |
 
 ## How it works
 
