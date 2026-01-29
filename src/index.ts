@@ -116,8 +116,7 @@ async function run(options: BusterOptions): Promise<void> {
 
     if (dryRun) {
       console.log(chalk.yellow('\n[DRY RUN] Would run Codex to fix these issues'));
-      state = markAddressed(state, unaddressed.map((c) => c.id));
-      saveState(workdir, state);
+      // Don't save state in dry run - just exit
       break;
     }
 
