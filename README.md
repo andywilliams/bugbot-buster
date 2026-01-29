@@ -1,0 +1,85 @@
+# 🤖 Bugbot Buster
+
+Automated PR review comment fixer using OpenAI Codex CLI.
+
+## What it does
+
+1. Takes a GitHub PR as input
+2. Fetches all unresolved review comments
+3. Uses Codex CLI to fix the issues
+4. Commits and pushes the fixes
+5. Waits, then checks for new comments
+6. Repeats until all comments are addressed
+
+## Prerequisites
+
+- Node.js 18+
+- GitHub CLI (`gh`) installed and authenticated
+- OpenAI Codex CLI (`codex`) installed and logged in
+- Must be run from within a git repository
+
+## Installation
+
+```bash
+npm install -g bugbot-buster
+```
+
+Or run directly:
+
+```bash
+npx bugbot-buster --pr owner/repo#123
+```
+
+## Usage
+
+```bash
+# Fix comments on a PR (from within the repo)
+bugbot-buster --pr #123
+
+# Full repo/PR path
+bugbot-buster --pr andywilliams/dwlf-indicators#26
+
+# Check every 10 minutes, max 5 runs
+bugbot-buster --pr #123 --interval 10 --max-runs 5
+
+# Dry run (show what would be done)
+bugbot-buster --pr #123 --dry-run
+
+# Verbose output
+bugbot-buster --pr #123 --verbose
+```
+
+## Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `-p, --pr <pr>` | PR to fix (required) | - |
+| `-i, --interval <min>` | Minutes between checks | 5 |
+| `-m, --max-runs <n>` | Maximum number of runs | 10 |
+| `-d, --dry-run` | Preview without changes | false |
+| `-v, --verbose` | Detailed output | false |
+
+## How it works
+
+1. **Fetches comments** via GitHub GraphQL API
+2. **Filters** out resolved threads and previously-addressed comments
+3. **Groups** comments by file for efficient Codex prompts
+4. **Runs Codex** with `--full-auto` to fix issues
+5. **Commits** changes with a descriptive message
+6. **Tracks** addressed comment IDs in `.bugbot-state.json`
+
+## State file
+
+The tool creates `.bugbot-state.json` in the repo root to track:
+- IDs of addressed comments (avoids re-processing)
+- Run history with timestamps and commit SHAs
+
+Add this to `.gitignore` if you don't want to track it.
+
+## License
+
+MIT
+
+## Authors
+
+Andy & Jenna 🦊

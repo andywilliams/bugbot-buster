@@ -1,0 +1,4 @@
+node_modules/
+dist/
+.bugbot-state.json
+*.log
