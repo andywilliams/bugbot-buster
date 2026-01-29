@@ -22,9 +22,9 @@ export function parsePR(pr: string): PRInfo {
     [owner, repo] = remote.split('/');
   }
 
-  // Get branch info
+  // Get branch info (specify repo explicitly)
   const prData = JSON.parse(
-    execSync(`gh pr view ${number} --json headRefName,baseRefName`, {
+    execSync(`gh pr view ${number} --repo ${owner}/${repo} --json headRefName,baseRefName`, {
       encoding: 'utf-8',
     })
   );
@@ -102,7 +102,7 @@ export function fetchPRComments(pr: PRInfo): PRComment[] {
  * Clone or update the repo and checkout the PR branch
  */
 export function checkoutPR(pr: PRInfo, workdir: string): void {
-  execSync(`gh pr checkout ${pr.number}`, {
+  execSync(`gh pr checkout ${pr.number} --repo ${pr.owner}/${pr.repo}`, {
     cwd: workdir,
     stdio: 'inherit',
   });
