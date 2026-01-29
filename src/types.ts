@@ -19,6 +19,7 @@ export interface PRInfo {
 
 export interface BusterState {
   addressedCommentIds: number[];
+  ignoredCommentIds: number[];
   lastRun: string;
   runs: RunRecord[];
 }
@@ -40,4 +41,5 @@ export interface BusterOptions {
   verbose: boolean;
   provider: AIProvider;
   signCommits: boolean;
+  validateComments: boolean;
 }

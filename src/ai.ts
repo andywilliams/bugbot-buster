@@ -188,3 +188,136 @@ export function checkAuth(provider: AIProvider): { ok: boolean; message?: string
 export function getProviderName(provider: AIProvider): string {
   return provider === 'codex' ? 'OpenAI Codex' : 'Claude Code';
 }
+
+/**
+ * Validate a comment - determine if it's actionable or should be ignored
+ * Returns true if the comment is valid and should be fixed
+ */
+export async function validateComment(
+  provider: AIProvider,
+  comment: PRComment,
+  workdir: string,
+  verbose: boolean
+): Promise<{ valid: boolean; reason: string }> {
+  const prompt = `You are evaluating a code review comment to determine if it's a valid, actionable issue.
+
+File: ${comment.path}${comment.line ? ` (line ${comment.line})` : ''}
+Comment: ${comment.body}
+
+Evaluate this comment and respond with ONLY a JSON object (no markdown, no explanation):
+{"valid": true/false, "reason": "brief explanation"}
+
+A comment is INVALID if:
+- It's a false positive (the code is actually correct)
+- It's about style preferences not in the project's style guide
+- It's asking for changes that would break functionality
+- It references code that doesn't exist or has already been fixed
+- It's a duplicate of another comment
+- It's nitpicking something trivial with no real impact
+
+A comment is VALID if:
+- It identifies a real bug or issue
+- It points out a genuine code quality problem
+- It suggests a meaningful improvement
+- It catches a security or performance issue
+
+Respond with the JSON only:`;
+
+  if (provider === 'codex') {
+    return validateWithCodex(prompt, workdir, verbose);
+  } else {
+    return validateWithClaude(prompt, workdir, verbose);
+  }
+}
+
+async function validateWithCodex(
+  prompt: string,
+  workdir: string,
+  verbose: boolean
+): Promise<{ valid: boolean; reason: string }> {
+  return new Promise((resolve) => {
+    const proc = spawn('codex', ['exec', '--full-auto', prompt], {
+      cwd: workdir,
+      stdio: 'pipe',
+    });
+
+    let output = '';
+    if (proc.stdout) {
+      proc.stdout.on('data', (data) => {
+        output += data.toString();
+      });
+    }
+    if (proc.stderr) {
+      proc.stderr.on('data', (data) => {
+        output += data.toString();
+      });
+    }
+
+    proc.on('close', () => {
+      try {
+        // Try to extract JSON from output
+        const jsonMatch = output.match(/\{[\s\S]*"valid"[\s\S]*\}/);
+        if (jsonMatch) {
+          const result = JSON.parse(jsonMatch[0]);
+          resolve({ valid: !!result.valid, reason: result.reason || '' });
+        } else {
+          if (verbose) console.log('Could not parse validation response:', output);
+          resolve({ valid: true, reason: 'Could not parse response, assuming valid' });
+        }
+      } catch {
+        if (verbose) console.log('Error parsing validation response:', output);
+        resolve({ valid: true, reason: 'Parse error, assuming valid' });
+      }
+    });
+
+    proc.on('error', () => {
+      resolve({ valid: true, reason: 'Validation failed, assuming valid' });
+    });
+  });
+}
+
+async function validateWithClaude(
+  prompt: string,
+  workdir: string,
+  verbose: boolean
+): Promise<{ valid: boolean; reason: string }> {
+  return new Promise((resolve) => {
+    const proc = spawn('claude', ['--print', '--dangerously-skip-permissions', prompt], {
+      cwd: workdir,
+      stdio: 'pipe',
+    });
+
+    let output = '';
+    if (proc.stdout) {
+      proc.stdout.on('data', (data) => {
+        output += data.toString();
+      });
+    }
+    if (proc.stderr) {
+      proc.stderr.on('data', (data) => {
+        output += data.toString();
+      });
+    }
+
+    proc.on('close', () => {
+      try {
+        // Try to extract JSON from output
+        const jsonMatch = output.match(/\{[\s\S]*"valid"[\s\S]*\}/);
+        if (jsonMatch) {
+          const result = JSON.parse(jsonMatch[0]);
+          resolve({ valid: !!result.valid, reason: result.reason || '' });
+        } else {
+          if (verbose) console.log('Could not parse validation response:', output);
+          resolve({ valid: true, reason: 'Could not parse response, assuming valid' });
+        }
+      } catch {
+        if (verbose) console.log('Error parsing validation response:', output);
+        resolve({ valid: true, reason: 'Parse error, assuming valid' });
+      }
+    });
+
+    proc.on('error', () => {
+      resolve({ valid: true, reason: 'Validation failed, assuming valid' });
+    });
+  });
+}

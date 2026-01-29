@@ -55,6 +55,9 @@ bugbot-buster --pr #123 --verbose
 
 # Sign commits with GPG (for repos requiring signed commits)
 bugbot-buster --pr #123 --sign
+
+# Validate comments before fixing (skip false positives)
+bugbot-buster --pr #123 --validate
 ```
 
 ## Options
@@ -68,6 +71,7 @@ bugbot-buster --pr #123 --sign
 | `-d, --dry-run` | Preview without changes | false |
 | `-v, --verbose` | Detailed output | false |
 | `-s, --sign` | Sign commits with GPG | false |
+| `--validate` | Validate comments, ignore invalid | false |
 
 ## How it works
 
@@ -82,9 +86,17 @@ bugbot-buster --pr #123 --sign
 
 The tool creates `.bugbot-state.json` in the repo root to track:
 - IDs of addressed comments (avoids re-processing)
+- IDs of ignored comments (false positives, when using `--validate`)
 - Run history with timestamps and commit SHAs
 
 Add this to `.gitignore` if you don't want to track it.
+
+## Comment validation
+
+With `--validate`, the tool asks the AI to evaluate each comment before fixing:
+- **Valid comments** are fixed as normal
+- **Invalid comments** (false positives, style nitpicks, etc.) are marked as ignored
+- Ignored comments are stored in state and won't be re-evaluated
 
 ## License
 

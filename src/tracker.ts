@@ -13,6 +13,7 @@ export function loadState(workdir: string): BusterState {
   if (!existsSync(statePath)) {
     return {
       addressedCommentIds: [],
+      ignoredCommentIds: [],
       lastRun: '',
       runs: [],
     };
@@ -20,10 +21,16 @@ export function loadState(workdir: string): BusterState {
 
   try {
     const content = readFileSync(statePath, 'utf-8');
-    return JSON.parse(content);
+    const state = JSON.parse(content);
+    // Ensure ignoredCommentIds exists for backward compatibility
+    return {
+      ...state,
+      ignoredCommentIds: state.ignoredCommentIds || [],
+    };
   } catch {
     return {
       addressedCommentIds: [],
+      ignoredCommentIds: [],
       lastRun: '',
       runs: [],
     };
@@ -76,13 +83,31 @@ export function addRunRecord(
 }
 
 /**
- * Filter out already-addressed comments
+ * Mark comments as ignored (invalid/not-actionable)
+ */
+export function markIgnored(
+  state: BusterState,
+  commentIds: number[]
+): BusterState {
+  const newIds = commentIds.filter(
+    (id) => !state.ignoredCommentIds.includes(id)
+  );
+
+  return {
+    ...state,
+    ignoredCommentIds: [...state.ignoredCommentIds, ...newIds],
+  };
+}
+
+/**
+ * Filter out already-addressed and ignored comments
  */
 export function filterUnaddressed<T extends { id: number }>(
   comments: T[],
   state: BusterState
 ): T[] {
   return comments.filter(
-    (c) => !state.addressedCommentIds.includes(c.id)
+    (c) => !state.addressedCommentIds.includes(c.id) && 
+           !state.ignoredCommentIds.includes(c.id)
   );
 }

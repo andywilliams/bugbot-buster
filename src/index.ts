@@ -3,11 +3,12 @@ import { program } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
 import { parsePR, fetchPRComments, checkoutPR, commitAndPush } from './github.js';
-import { buildPrompt, runAI, checkAuth, getProviderName } from './ai.js';
+import { buildPrompt, runAI, checkAuth, getProviderName, validateComment } from './ai.js';
 import {
   loadState,
   saveState,
   markAddressed,
+  markIgnored,
   addRunRecord,
   filterUnaddressed,
 } from './tracker.js';
@@ -18,7 +19,7 @@ async function sleep(ms: number): Promise<void> {
 }
 
 async function run(options: BusterOptions): Promise<void> {
-  const { pr, interval, maxRuns, dryRun, verbose, provider, signCommits } = options;
+  const { pr, interval, maxRuns, dryRun, verbose, provider, signCommits, validateComments } = options;
 
   console.log(chalk.bold('\n🤖 Bugbot Buster\n'));
   console.log(chalk.dim(`Using: ${getProviderName(provider)}\n`));
@@ -63,7 +64,7 @@ async function run(options: BusterOptions): Promise<void> {
   // Load state
   let state = loadState(workdir);
   console.log(
-    chalk.dim(`Previously addressed: ${state.addressedCommentIds.length} comments`)
+    chalk.dim(`Previously addressed: ${state.addressedCommentIds.length} comments, ignored: ${state.ignoredCommentIds.length}`)
   );
 
   // Main loop
@@ -114,6 +115,44 @@ async function run(options: BusterOptions): Promise<void> {
       );
     }
 
+    // Validate comments if enabled
+    let toFix = unaddressed;
+    const ignoredIds: number[] = [];
+    
+    if (validateComments) {
+      console.log(chalk.cyan('\nValidating comments...'));
+      const validated: PRComment[] = [];
+      
+      for (const comment of unaddressed) {
+        spinner.start(`Validating: ${comment.path}:${comment.line ?? '?'}...`);
+        const result = await validateComment(provider, comment, workdir, verbose);
+        
+        if (result.valid) {
+          spinner.succeed(chalk.green(`Valid: ${result.reason}`));
+          validated.push(comment);
+        } else {
+          spinner.warn(chalk.yellow(`Ignored: ${result.reason}`));
+          ignoredIds.push(comment.id);
+        }
+      }
+      
+      toFix = validated;
+      
+      // Save ignored comments
+      if (ignoredIds.length > 0) {
+        state = markIgnored(state, ignoredIds);
+        saveState(workdir, state);
+        console.log(chalk.dim(`\nMarked ${ignoredIds.length} comments as ignored`));
+      }
+      
+      if (toFix.length === 0) {
+        console.log(chalk.green('\n✅ All comments were invalid/ignored!'));
+        continue;
+      }
+      
+      console.log(chalk.dim(`\n${toFix.length} valid comments to fix`));
+    }
+
     if (dryRun) {
       console.log(chalk.yellow('\n[DRY RUN] Would run Codex to fix these issues'));
       // Don't save state in dry run - just exit
@@ -121,7 +160,7 @@ async function run(options: BusterOptions): Promise<void> {
     }
 
     // Run AI to fix issues
-    const prompt = buildPrompt(unaddressed);
+    const prompt = buildPrompt(toFix);
     spinner.start(`Running ${getProviderName(provider)} to fix issues...`);
     const success = await runAI(provider, prompt, workdir, verbose);
 
@@ -146,10 +185,10 @@ async function run(options: BusterOptions): Promise<void> {
     }
 
     // Update state
-    state = markAddressed(state, unaddressed.map((c) => c.id));
+    state = markAddressed(state, toFix.map((c) => c.id));
     state = addRunRecord(state, {
       commentsFound: unaddressed.length,
-      commentsAddressed: unaddressed.length,
+      commentsAddressed: toFix.length,
       commitSha: sha ?? undefined,
     });
     saveState(workdir, state);
@@ -181,6 +220,7 @@ program
   .option('-d, --dry-run', 'Show what would be done without making changes')
   .option('-v, --verbose', 'Show detailed output')
   .option('-s, --sign', 'Sign commits with GPG (-S flag)')
+  .option('--validate', 'Validate comments before fixing (ignore invalid/false positives)')
   .action((opts) => {
     const provider = opts.ai as AIProvider;
     if (provider !== 'codex' && provider !== 'claude') {
@@ -195,6 +235,7 @@ program
       verbose: opts.verbose ?? false,
       provider,
       signCommits: opts.sign ?? false,
+      validateComments: opts.validate ?? false,
     }).catch((error) => {
       console.error(chalk.red('Fatal error:'), error);
       process.exit(1);
