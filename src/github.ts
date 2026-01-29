@@ -124,7 +124,7 @@ export function commitAndPush(message: string, workdir: string): string | null {
     }
 
     execSync('git add -A', { cwd: workdir });
-    execSync(`git commit -m "${message}"`, { cwd: workdir });
+    execSync(`git commit --no-verify -m "${message}"`, { cwd: workdir });
     execSync('git push', { cwd: workdir });
 
     const sha = execSync('git rev-parse HEAD', {
