@@ -24,9 +24,13 @@ async function run(options: BusterOptions): Promise<void> {
   console.log(chalk.dim(`Using: ${getProviderName(provider)}\n`));
 
   // Check AI provider auth
-  if (!checkAuth(provider)) {
+  const authCheck = checkAuth(provider);
+  if (!authCheck.ok) {
     const loginCmd = provider === 'codex' ? 'codex login' : 'claude (install from npm)';
     console.error(chalk.red(`❌ ${getProviderName(provider)} not available. Run: ${loginCmd}`));
+    if (authCheck.message) {
+      console.error(chalk.dim(`   ${authCheck.message}`));
+    }
     process.exit(1);
   }
 

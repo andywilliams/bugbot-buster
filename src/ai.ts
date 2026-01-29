@@ -162,18 +162,23 @@ async function runClaude(
 /**
  * Check if the selected AI provider is available and authenticated
  */
-export function checkAuth(provider: AIProvider): boolean {
+export function checkAuth(provider: AIProvider): { ok: boolean; message?: string } {
   try {
     if (provider === 'codex') {
-      const status = execSync('codex login status', { encoding: 'utf-8' });
-      return status.includes('Logged in');
+      const status = execSync('codex login status 2>&1', { 
+        encoding: 'utf-8',
+        shell: true,
+      });
+      const isLoggedIn = status.toLowerCase().includes('logged in');
+      return { ok: isLoggedIn, message: status.trim() };
     } else {
       // Claude Code CLI - just check if it exists
       execSync('claude --version', { encoding: 'utf-8' });
-      return true;
+      return { ok: true };
     }
-  } catch {
-    return false;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    return { ok: false, message };
   }
 }
 
