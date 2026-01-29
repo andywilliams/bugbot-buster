@@ -19,10 +19,14 @@ async function sleep(ms: number): Promise<void> {
 }
 
 async function run(options: BusterOptions): Promise<void> {
-  const { pr, interval, maxRuns, dryRun, verbose, provider, signCommits, validateComments } = options;
+  const { pr, interval, maxRuns, dryRun, verbose, provider, signCommits, validateComments, authors } = options;
 
   console.log(chalk.bold('\n🤖 Bugbot Buster\n'));
-  console.log(chalk.dim(`Using: ${getProviderName(provider)}\n`));
+  console.log(chalk.dim(`Using: ${getProviderName(provider)}`));
+  if (authors?.length) {
+    console.log(chalk.dim(`Filtering to authors: ${authors.join(', ')}`));
+  }
+  console.log('');
 
   // Check AI provider auth
   const authCheck = checkAuth(provider);
@@ -87,11 +91,14 @@ async function run(options: BusterOptions): Promise<void> {
 
     // Filter unresolved and unaddressed
     const unresolved = comments.filter((c) => !c.isResolved);
-    const unaddressed = filterUnaddressed(unresolved, state);
+    const byAuthor = authors?.length 
+      ? unresolved.filter((c) => authors.includes(c.author))
+      : unresolved;
+    const unaddressed = filterUnaddressed(byAuthor, state);
 
     console.log(
       chalk.dim(
-        `  Unresolved: ${unresolved.length}, New to address: ${unaddressed.length}`
+        `  Unresolved: ${unresolved.length}${authors?.length ? `, from allowed authors: ${byAuthor.length}` : ''}, New to address: ${unaddressed.length}`
       )
     );
 
@@ -221,6 +228,7 @@ program
   .option('-v, --verbose', 'Show detailed output')
   .option('-s, --sign', 'Sign commits with GPG (-S flag)')
   .option('--validate', 'Validate comments before fixing (ignore invalid/false positives)')
+  .option('--authors <list>', 'Only process comments from these authors (comma-separated)')
   .action((opts) => {
     const provider = opts.ai as AIProvider;
     if (provider !== 'codex' && provider !== 'claude') {
@@ -236,6 +244,7 @@ program
       provider,
       signCommits: opts.sign ?? false,
       validateComments: opts.validate ?? false,
+      authors: opts.authors ? opts.authors.split(',').map((a: string) => a.trim()) : undefined,
     }).catch((error) => {
       console.error(chalk.red('Fatal error:'), error);
       process.exit(1);

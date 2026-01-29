@@ -42,4 +42,5 @@ export interface BusterOptions {
   provider: AIProvider;
   signCommits: boolean;
   validateComments: boolean;
+  authors?: string[];
 }
