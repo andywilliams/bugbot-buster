@@ -76,6 +76,10 @@ bugbot-buster --pr #123 --sign
 
 # Validate comments before fixing (skip false positives)
 bugbot-buster --pr #123 --validate
+
+# Only process comments from specific authors (security)
+bugbot-buster --pr #123 --authors cursor
+bugbot-buster --pr #123 --authors "cursor,dependabot,my-tech-lead"
 ```
 
 ## Options
@@ -90,6 +94,7 @@ bugbot-buster --pr #123 --validate
 | `-v, --verbose` | Detailed output | false |
 | `-s, --sign` | Sign commits with GPG | false |
 | `--validate` | Validate comments, ignore invalid | false |
+| `--authors <list>` | Only process comments from these authors (comma-separated) | all |
 
 ## How it works
 
@@ -108,6 +113,26 @@ The tool creates `.bugbot-state.json` in the repo root to track:
 - Run history with timestamps and commit SHAs
 
 Add this to `.gitignore` if you don't want to track it.
+
+## Security
+
+### Prompt injection risk
+
+Since bugbot-buster feeds PR comments to an AI, malicious comments could potentially trick the AI into unintended actions. The `--authors` flag mitigates this by only processing comments from trusted sources:
+
+```bash
+# Only fix comments from Cursor's Bugbot
+bugbot-buster --pr #123 --authors cursor
+
+# Trust multiple authors
+bugbot-buster --pr #123 --authors "cursor,dependabot"
+```
+
+**Recommendations:**
+- On public repos, always use `--authors` to filter to trusted bots/users
+- On private repos with trusted team members, the risk is lower
+- The `--dry-run` flag lets you preview changes before committing
+- Running in a sandboxed environment adds an extra layer of protection
 
 ## Comment validation
 
