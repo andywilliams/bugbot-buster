@@ -39,4 +39,5 @@ export interface BusterOptions {
   dryRun: boolean;
   verbose: boolean;
   provider: AIProvider;
+  signCommits: boolean;
 }

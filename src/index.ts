@@ -18,7 +18,7 @@ async function sleep(ms: number): Promise<void> {
 }
 
 async function run(options: BusterOptions): Promise<void> {
-  const { pr, interval, maxRuns, dryRun, verbose, provider } = options;
+  const { pr, interval, maxRuns, dryRun, verbose, provider, signCommits } = options;
 
   console.log(chalk.bold('\n🤖 Bugbot Buster\n'));
   console.log(chalk.dim(`Using: ${getProviderName(provider)}\n`));
@@ -132,10 +132,11 @@ async function run(options: BusterOptions): Promise<void> {
     spinner.succeed(`${getProviderName(provider)} completed`);
 
     // Commit and push
-    spinner.start('Committing and pushing...');
+    spinner.start(`Committing${signCommits ? ' (signed)' : ''} and pushing...`);
     const sha = commitAndPush(
       `fix: address ${unaddressed.length} review comment(s)`,
-      workdir
+      workdir,
+      signCommits
     );
 
     if (sha) {
@@ -179,6 +180,7 @@ program
   .option('-m, --max-runs <count>', 'Maximum number of runs', '10')
   .option('-d, --dry-run', 'Show what would be done without making changes')
   .option('-v, --verbose', 'Show detailed output')
+  .option('-s, --sign', 'Sign commits with GPG (-S flag)')
   .action((opts) => {
     const provider = opts.ai as AIProvider;
     if (provider !== 'codex' && provider !== 'claude') {
@@ -192,6 +194,7 @@ program
       dryRun: opts.dryRun ?? false,
       verbose: opts.verbose ?? false,
       provider,
+      signCommits: opts.sign ?? false,
     }).catch((error) => {
       console.error(chalk.red('Fatal error:'), error);
       process.exit(1);

@@ -110,8 +110,9 @@ export function checkoutPR(pr: PRInfo, workdir: string): void {
 
 /**
  * Commit and push changes
+ * @param sign - If true, sign the commit with GPG (-S flag)
  */
-export function commitAndPush(message: string, workdir: string): string | null {
+export function commitAndPush(message: string, workdir: string, sign = false): string | null {
   try {
     // Check if there are changes
     const status = execSync('git status --porcelain', {
@@ -123,8 +124,9 @@ export function commitAndPush(message: string, workdir: string): string | null {
       return null; // No changes
     }
 
+    const signFlag = sign ? '-S ' : '';
     execSync('git add -A', { cwd: workdir });
-    execSync(`git commit --no-verify -m "${message}"`, { cwd: workdir });
+    execSync(`git commit --no-verify ${signFlag}-m "${message}"`, { cwd: workdir });
     execSync('git push', { cwd: workdir });
 
     const sha = execSync('git rev-parse HEAD', {
