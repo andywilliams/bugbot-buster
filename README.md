@@ -22,20 +22,38 @@ Automated PR review comment fixer using AI coding assistants.
 
 ## Installation
 
+### From source (recommended)
+
 ```bash
-npm install -g bugbot-buster
+# Clone the repo
+git clone https://github.com/andywilliams/bugbot-buster.git
+cd bugbot-buster
+
+# Install dependencies and build
+npm install
+npm run build
+
+# Run from the repo directory
+node dist/index.js --pr owner/repo#123
 ```
 
-Or run directly:
+### Global install (coming soon)
 
 ```bash
-npx bugbot-buster --pr owner/repo#123
+npm install -g bugbot-buster
+bugbot-buster --pr owner/repo#123
 ```
 
 ## Usage
 
+**Important:** Run from within the target repository (where the PR code lives).
+
 ```bash
-# Fix comments on a PR using Codex (default)
+# From source: run from within the repo you want to fix
+cd /path/to/your-project
+node /path/to/bugbot-buster/dist/index.js --pr #123
+
+# Or with global install:
 bugbot-buster --pr #123
 
 # Use Claude Code instead of Codex
