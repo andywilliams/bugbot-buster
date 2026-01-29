@@ -2,7 +2,7 @@
 import { program } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
-import { parsePR, fetchPRComments, checkoutPR, commitAndPush } from './github.js';
+import { parsePR, fetchPRComments, checkoutPR, commitAndPush, waitForBugbotReview } from './github.js';
 import { buildPrompt, runAI, checkAuth, getProviderName, validateComment } from './ai.js';
 import {
   loadState,
@@ -19,7 +19,7 @@ async function sleep(ms: number): Promise<void> {
 }
 
 async function run(options: BusterOptions): Promise<void> {
-  const { pr, interval, maxRuns, dryRun, verbose, provider, signCommits, validateComments, authors } = options;
+  const { pr, interval, maxRuns, dryRun, verbose, provider, signCommits, validateComments, authors, waitForReview } = options;
 
   console.log(chalk.bold('\n🤖 Bugbot Buster\n'));
   console.log(chalk.dim(`Using: ${getProviderName(provider)}`));
@@ -202,8 +202,20 @@ async function run(options: BusterOptions): Promise<void> {
 
     // Wait before next run
     if (runCount < maxRuns) {
-      console.log(chalk.dim(`\nWaiting ${interval} minutes before next check...`));
-      await sleep(interval * 60 * 1000);
+      if (waitForReview && sha) {
+        console.log(chalk.dim('\nWaiting for Bugbot to review the push...'));
+        const reviewed = await waitForBugbotReview(prInfo, {
+          timeoutMs: 10 * 60 * 1000,
+          pollIntervalMs: 30_000,
+          verbose,
+        });
+        if (!reviewed) {
+          console.log(chalk.yellow('Bugbot review timed out — continuing anyway'));
+        }
+      } else {
+        console.log(chalk.dim(`\nWaiting ${interval} minutes before next check...`));
+        await sleep(interval * 60 * 1000);
+      }
     }
   }
 
@@ -229,6 +241,7 @@ program
   .option('-s, --sign', 'Sign commits with GPG (-S flag)')
   .option('--validate', 'Validate comments before fixing (ignore invalid/false positives)')
   .option('--authors <list>', 'Only process comments from these authors (comma-separated)')
+  .option('--wait-for-review', 'Wait for Bugbot to finish reviewing before next run (instead of fixed interval)')
   .action((opts) => {
     const provider = opts.ai as AIProvider;
     if (provider !== 'codex' && provider !== 'claude') {
@@ -245,6 +258,7 @@ program
       signCommits: opts.sign ?? false,
       validateComments: opts.validate ?? false,
       authors: opts.authors ? opts.authors.split(',').map((a: string) => a.trim()) : undefined,
+      waitForReview: opts.waitForReview ?? false,
     }).catch((error) => {
       console.error(chalk.red('Fatal error:'), error);
       process.exit(1);

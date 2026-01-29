@@ -99,6 +99,50 @@ export function fetchPRComments(pr: PRInfo): PRComment[] {
 }
 
 /**
+ * Wait for Cursor Bugbot to finish reviewing the PR.
+ * Polls every `pollInterval` ms until the check is completed or timeout is reached.
+ * Returns true if Bugbot finished, false if timed out.
+ */
+export async function waitForBugbotReview(
+  pr: PRInfo,
+  opts: { timeoutMs?: number; pollIntervalMs?: number; verbose?: boolean } = {}
+): Promise<boolean> {
+  const { timeoutMs = 10 * 60 * 1000, pollIntervalMs = 30_000, verbose = false } = opts;
+  const start = Date.now();
+
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const result = JSON.parse(
+        execSync(
+          `gh pr checks ${pr.number} --repo ${pr.owner}/${pr.repo} --json name,state,completedAt 2>/dev/null || echo "[]"`,
+          { encoding: 'utf-8' }
+        )
+      );
+
+      const bugbot = result.find?.((c: { name: string }) =>
+        c.name.toLowerCase().includes('bugbot') || c.name.toLowerCase().includes('cursor')
+      );
+
+      if (!bugbot) {
+        if (verbose) console.log('  No Bugbot check found yet, waiting...');
+      } else if (bugbot.state === 'SUCCESS' || bugbot.state === 'NEUTRAL' || bugbot.state === 'FAILURE') {
+        if (verbose) console.log(`  Bugbot review completed (${bugbot.state})`);
+        return true;
+      } else {
+        if (verbose) console.log(`  Bugbot status: ${bugbot.state}, waiting...`);
+      }
+    } catch {
+      if (verbose) console.log('  Failed to check Bugbot status, retrying...');
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+  }
+
+  console.log('  ⚠️ Timed out waiting for Bugbot review');
+  return false;
+}
+
+/**
  * Clone or update the repo and checkout the PR branch
  */
 export function checkoutPR(pr: PRInfo, workdir: string): void {

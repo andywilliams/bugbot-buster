@@ -43,4 +43,5 @@ export interface BusterOptions {
   signCommits: boolean;
   validateComments: boolean;
   authors?: string[];
+  waitForReview?: boolean;
 }
