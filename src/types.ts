@@ -40,6 +40,7 @@ export interface BusterOptions {
   maxRuns: number;
   dryRun: boolean;
   verbose: boolean;
+  stream: boolean;
   provider: AIProvider;
   signCommits: boolean;
   validateComments: boolean;

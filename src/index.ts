@@ -23,7 +23,7 @@ async function sleep(ms: number): Promise<void> {
  * Resolve-addressed mode: find unresolved comments that have been addressed and resolve them
  */
 async function runResolveAddressed(options: BusterOptions): Promise<void> {
-  const { pr, dryRun, verbose, provider, authors } = options;
+  const { pr, dryRun, verbose, stream, provider, authors } = options;
 
   console.log(chalk.bold('\n🔍 Bugbot Buster — Resolve Addressed Mode\n'));
   console.log(chalk.dim(`Using: ${getProviderName(provider)}`));
@@ -158,7 +158,8 @@ async function runResolveAddressed(options: BusterOptions): Promise<void> {
       currentContent,
       recentCommits,
       workdir,
-      verbose
+      verbose,
+      stream
     );
 
     if (result.addressed) {
@@ -205,7 +206,7 @@ async function runResolveAddressed(options: BusterOptions): Promise<void> {
 }
 
 async function run(options: BusterOptions): Promise<void> {
-  const { pr, interval, maxRuns, dryRun, verbose, provider, signCommits, validateComments, authors, waitForReview } = options;
+  const { pr, interval, maxRuns, dryRun, verbose, stream, provider, signCommits, validateComments, authors, waitForReview } = options;
 
   console.log(chalk.bold('\n🤖 Bugbot Buster\n'));
   console.log(chalk.dim(`Using: ${getProviderName(provider)}`));
@@ -318,7 +319,7 @@ async function run(options: BusterOptions): Promise<void> {
       
       for (const comment of unaddressed) {
         spinner.start(`Validating: ${comment.path}:${comment.line ?? '?'}...`);
-        const result = await validateComment(provider, comment, workdir, verbose);
+        const result = await validateComment(provider, comment, workdir, verbose, stream);
         
         if (result.valid) {
           spinner.succeed(chalk.green(`Valid: ${result.reason}`));
@@ -355,7 +356,7 @@ async function run(options: BusterOptions): Promise<void> {
     // Run AI to fix issues
     const prompt = buildPrompt(toFix);
     spinner.start(`Running ${getProviderName(provider)} to fix issues...`);
-    const success = await runAI(provider, prompt, workdir, verbose);
+    const success = await runAI(provider, prompt, workdir, verbose, stream);
 
     if (!success) {
       spinner.fail(`${getProviderName(provider)} failed to fix issues`);
@@ -427,6 +428,7 @@ program
   .option('-s, --sign', 'Sign commits with GPG (-S flag)')
   .option('--validate', 'Validate comments before fixing (ignore invalid/false positives)')
   .option('--authors <list>', 'Only process comments from these authors (comma-separated)')
+  .option('--stream', 'Stream AI output to the terminal in real-time')
   .option('--wait-for-review', 'Wait for Bugbot to finish reviewing before next run (instead of fixed interval)')
   .option('-r, --resolve-addressed', 'Find and resolve review threads that have already been addressed in code')
   .action((opts) => {
@@ -441,6 +443,7 @@ program
       maxRuns: parseInt(opts.maxRuns, 10),
       dryRun: opts.dryRun ?? false,
       verbose: opts.verbose ?? false,
+      stream: opts.stream ?? false,
       provider,
       signCommits: opts.sign ?? false,
       validateComments: opts.validate ?? false,
