@@ -4,12 +4,19 @@ Automated PR review comment fixer using AI coding assistants.
 
 ## What it does
 
+### Fix mode (default)
 1. Takes a GitHub PR as input
 2. Fetches all unresolved review comments
 3. Uses AI (Codex or Claude) to fix the issues
 4. Commits and pushes the fixes
 5. Waits, then checks for new comments
 6. Repeats until all comments are addressed
+
+### Resolve mode (`--resolve-addressed`)
+1. Finds unresolved review threads on a PR
+2. Uses AI to check if each comment has already been addressed in a subsequent commit
+3. If addressed: replies with the resolving commit and marks the thread as resolved
+4. If not: leaves it unresolved
 
 ## Prerequisites
 
@@ -80,6 +87,15 @@ bugbot-buster --pr #123 --validate
 # Only process comments from specific authors (security)
 bugbot-buster --pr #123 --authors cursor
 bugbot-buster --pr #123 --authors "cursor,dependabot,my-tech-lead"
+
+# Resolve addressed comments (cleanup stale threads)
+bugbot-buster --pr #123 --resolve-addressed
+
+# Resolve + filter to specific authors
+bugbot-buster --pr #123 --resolve-addressed --authors cursor
+
+# Dry run resolve (see what would be resolved without acting)
+bugbot-buster --pr #123 --resolve-addressed --dry-run
 ```
 
 ## Options
@@ -95,6 +111,7 @@ bugbot-buster --pr #123 --authors "cursor,dependabot,my-tech-lead"
 | `-s, --sign` | Sign commits with GPG | false |
 | `--validate` | Validate comments, ignore invalid | false |
 | `--authors <list>` | Only process comments from these authors (comma-separated) | all |
+| `-r, --resolve-addressed` | Find and resolve already-addressed comments | false |
 
 ## How it works
 
@@ -133,6 +150,25 @@ bugbot-buster --pr #123 --authors "cursor,dependabot"
 - On private repos with trusted team members, the risk is lower
 - The `--dry-run` flag lets you preview changes before committing
 - Running in a sandboxed environment adds an extra layer of protection
+
+## Resolving addressed comments
+
+With `--resolve-addressed`, the tool switches from "fix" mode to "cleanup" mode. Instead of making code changes, it reviews unresolved threads to check if they've already been addressed:
+
+```bash
+bugbot-buster --pr #123 --resolve-addressed
+```
+
+For each unresolved comment, the AI examines:
+- The original review comment
+- The current state of the file
+- Recent commits that touched the file after the comment was posted
+
+If the comment has been addressed, the tool:
+1. **Replies** to the thread with the commit SHA that resolved it and a brief explanation
+2. **Marks the thread as resolved** via the GitHub API
+
+This is useful for cleaning up PRs after a round of fixes — threads that were addressed but never formally resolved show up as noise. Run with `--dry-run` first to preview what would be resolved.
 
 ## Comment validation
 
