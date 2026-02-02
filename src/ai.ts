@@ -1,4 +1,5 @@
 import { execSync, spawn } from 'child_process';
+import chalk from 'chalk';
 import type { PRComment, AIProvider, ResolveResult, CommitInfo } from './types.js';
 
 /**
@@ -122,11 +123,16 @@ async function runClaude(
       prompt,
     ];
 
+    // When streaming, use --output-format stream-json for real-time output
+    if (stream) {
+      args.splice(1, 0, '--output-format', 'stream-json');
+    }
+
     if (verbose) {
       console.log('Running Claude with prompt:', prompt.slice(0, 200) + '...');
     }
 
-    const useInherit = verbose || stream;
+    const useInherit = verbose && !stream;
     const proc = spawn('claude', args, {
       cwd: workdir,
       stdio: useInherit ? 'inherit' : 'pipe',
@@ -136,7 +142,21 @@ async function runClaude(
 
     if (!useInherit && proc.stdout) {
       proc.stdout.on('data', (data) => {
-        output += data.toString();
+        const chunk = data.toString();
+        output += chunk;
+        if (stream) {
+          // Parse stream-json lines and extract text deltas
+          for (const line of chunk.split('\n')) {
+            if (!line.trim()) continue;
+            try {
+              const event = JSON.parse(line);
+              const text = event?.event?.delta?.text;
+              if (text) process.stdout.write(text);
+            } catch {
+              // Not valid JSON line, skip
+            }
+          }
+        }
       });
     }
 
@@ -147,10 +167,11 @@ async function runClaude(
     }
 
     proc.on('close', (code) => {
+      if (stream) process.stdout.write('\n');
       if (code === 0) {
         resolve(true);
       } else {
-        if (!useInherit) {
+        if (!useInherit && !stream) {
           console.error('Claude failed:', output);
         }
         resolve(false);
@@ -229,72 +250,55 @@ A comment is VALID if:
 
 Respond with the JSON only:`;
 
-  if (provider === 'codex') {
-    return validateWithCodex(prompt, workdir, verbose, stream);
-  } else {
-    return validateWithClaude(prompt, workdir, verbose, stream);
-  }
+  return runValidation(provider, prompt, workdir, verbose, stream);
 }
 
-async function validateWithCodex(
-  prompt: string,
-  workdir: string,
-  verbose: boolean,
-  stream: boolean = false
-): Promise<{ valid: boolean; reason: string }> {
-  return new Promise((resolve) => {
-    const proc = spawn('codex', ['exec', '--full-auto', prompt], {
-      cwd: workdir,
-      stdio: 'pipe',
-    });
-
-    let output = '';
-    if (proc.stdout) {
-      proc.stdout.on('data', (data) => {
-        const chunk = data.toString();
-        output += chunk;
-        if (stream || verbose) process.stdout.write(chunk);
-      });
-    }
-    if (proc.stderr) {
-      proc.stderr.on('data', (data) => {
-        const chunk = data.toString();
-        output += chunk;
-        if (stream || verbose) process.stderr.write(chunk);
-      });
-    }
-
-    proc.on('close', () => {
-      try {
-        // Try to extract JSON from output
-        const jsonMatch = output.match(/\{[\s\S]*"valid"[\s\S]*\}/);
-        if (jsonMatch) {
-          const result = JSON.parse(jsonMatch[0]);
-          resolve({ valid: !!result.valid, reason: result.reason || '' });
-        } else {
-          if (verbose) console.log('Could not parse validation response:', output);
-          resolve({ valid: true, reason: 'Could not parse response, assuming valid' });
+/**
+ * Extract text content from Claude stream-json output.
+ * Parses JSON lines and concatenates text_delta values.
+ */
+function extractTextFromStreamJson(raw: string): string {
+  let text = '';
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const event = JSON.parse(line);
+      const delta = event?.event?.delta?.text;
+      if (delta) text += delta;
+      // Also capture result message content
+      const content = event?.message?.content;
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          if (block.text) text += block.text;
         }
-      } catch {
-        if (verbose) console.log('Error parsing validation response:', output);
-        resolve({ valid: true, reason: 'Parse error, assuming valid' });
       }
-    });
-
-    proc.on('error', () => {
-      resolve({ valid: true, reason: 'Validation failed, assuming valid' });
-    });
-  });
+    } catch {
+      // Not a JSON line — might be plain text output (codex)
+      text += line + '\n';
+    }
+  }
+  return text;
 }
 
-async function validateWithClaude(
+async function runValidation(
+  provider: AIProvider,
   prompt: string,
   workdir: string,
   verbose: boolean,
   stream: boolean = false
 ): Promise<{ valid: boolean; reason: string }> {
+  const isStreamClaude = stream && provider === 'claude';
+  const cmd = provider === 'codex'
+    ? { bin: 'codex', args: ['exec', '--full-auto', prompt] }
+    : { bin: 'claude', args: [
+        '--print',
+        ...(isStreamClaude ? ['--output-format', 'stream-json'] : []),
+        '--dangerously-skip-permissions',
+        prompt,
+      ] };
+
   return new Promise((resolve) => {
-    const proc = spawn('claude', ['--print', '--dangerously-skip-permissions', prompt], {
+    const proc = spawn(cmd.bin, cmd.args, {
       cwd: workdir,
       stdio: 'pipe',
     });
@@ -304,30 +308,49 @@ async function validateWithClaude(
       proc.stdout.on('data', (data) => {
         const chunk = data.toString();
         output += chunk;
-        if (stream || verbose) process.stdout.write(chunk);
+        if (stream) {
+          if (isStreamClaude) {
+            for (const line of chunk.split('\n')) {
+              if (!line.trim()) continue;
+              try {
+                const event = JSON.parse(line);
+                const text = event?.event?.delta?.text;
+                if (text) process.stdout.write(text);
+              } catch { /* skip */ }
+            }
+          } else {
+            process.stdout.write(chunk);
+          }
+        }
       });
     }
     if (proc.stderr) {
       proc.stderr.on('data', (data) => {
-        const chunk = data.toString();
-        output += chunk;
-        if (stream || verbose) process.stderr.write(chunk);
+        output += data.toString();
       });
     }
 
     proc.on('close', () => {
+      if (stream) process.stdout.write('\n');
+      // For stream-json, extract the actual text content for parsing
+      const textOutput = isStreamClaude ? extractTextFromStreamJson(output) : output;
+
+      if (verbose && !stream && textOutput.trim()) {
+        console.log(chalk.dim('--- AI output ---'));
+        console.log(textOutput.trim());
+        console.log(chalk.dim('--- end ---'));
+      }
       try {
-        // Try to extract JSON from output
-        const jsonMatch = output.match(/\{[\s\S]*"valid"[\s\S]*\}/);
+        const jsonMatch = textOutput.match(/\{[\s\S]*"valid"[\s\S]*\}/);
         if (jsonMatch) {
           const result = JSON.parse(jsonMatch[0]);
           resolve({ valid: !!result.valid, reason: result.reason || '' });
         } else {
-          if (verbose) console.log('Could not parse validation response:', output);
+          if (verbose) console.log('Could not parse validation response:', textOutput);
           resolve({ valid: true, reason: 'Could not parse response, assuming valid' });
         }
       } catch {
-        if (verbose) console.log('Error parsing validation response:', output);
+        if (verbose) console.log('Error parsing validation response:', textOutput);
         resolve({ valid: true, reason: 'Parse error, assuming valid' });
       }
     });
@@ -405,13 +428,18 @@ async function runResolveCheck(
   verbose: boolean,
   stream: boolean = false
 ): Promise<ResolveResult> {
-  const cmd =
-    provider === 'codex'
-      ? ['codex', ['exec', '--full-auto', prompt]]
-      : ['claude', ['--print', '--dangerously-skip-permissions', prompt]];
+  const isStreamClaude = stream && provider === 'claude';
+  const cmd = provider === 'codex'
+    ? { bin: 'codex', args: ['exec', '--full-auto', prompt] }
+    : { bin: 'claude', args: [
+        '--print',
+        ...(isStreamClaude ? ['--output-format', 'stream-json'] : []),
+        '--dangerously-skip-permissions',
+        prompt,
+      ] };
 
   return new Promise((resolve) => {
-    const proc = spawn(cmd[0] as string, cmd[1] as string[], {
+    const proc = spawn(cmd.bin, cmd.args, {
       cwd: workdir,
       stdio: 'pipe',
     });
@@ -421,20 +449,39 @@ async function runResolveCheck(
       proc.stdout.on('data', (data) => {
         const chunk = data.toString();
         output += chunk;
-        if (stream || verbose) process.stdout.write(chunk);
+        if (stream) {
+          if (isStreamClaude) {
+            for (const line of chunk.split('\n')) {
+              if (!line.trim()) continue;
+              try {
+                const event = JSON.parse(line);
+                const text = event?.event?.delta?.text;
+                if (text) process.stdout.write(text);
+              } catch { /* skip */ }
+            }
+          } else {
+            process.stdout.write(chunk);
+          }
+        }
       });
     }
     if (proc.stderr) {
       proc.stderr.on('data', (data) => {
-        const chunk = data.toString();
-        output += chunk;
-        if (stream || verbose) process.stderr.write(chunk);
+        output += data.toString();
       });
     }
 
     proc.on('close', () => {
+      if (stream) process.stdout.write('\n');
+      const textOutput = isStreamClaude ? extractTextFromStreamJson(output) : output;
+
+      if (verbose && !stream && textOutput.trim()) {
+        console.log(chalk.dim('--- AI output ---'));
+        console.log(textOutput.trim());
+        console.log(chalk.dim('--- end ---'));
+      }
       try {
-        const jsonMatch = output.match(/\{[\s\S]*"addressed"[\s\S]*\}/);
+        const jsonMatch = textOutput.match(/\{[\s\S]*"addressed"[\s\S]*\}/);
         if (jsonMatch) {
           const result = JSON.parse(jsonMatch[0]);
           resolve({
@@ -443,11 +490,11 @@ async function runResolveCheck(
             explanation: result.explanation || '',
           });
         } else {
-          if (verbose) console.log('Could not parse resolve-check response:', output);
+          if (verbose) console.log('Could not parse resolve-check response:', textOutput);
           resolve({ addressed: false, explanation: 'Could not parse AI response' });
         }
       } catch {
-        if (verbose) console.log('Error parsing resolve-check response:', output);
+        if (verbose) console.log('Error parsing resolve-check response:', textOutput);
         resolve({ addressed: false, explanation: 'Parse error in AI response' });
       }
     });
