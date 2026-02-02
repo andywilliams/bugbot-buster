@@ -2,8 +2,9 @@
 import { program } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
-import { parsePR, fetchPRComments, checkoutPR, commitAndPush, waitForBugbotReview } from './github.js';
-import { buildPrompt, runAI, checkAuth, getProviderName, validateComment } from './ai.js';
+import { execSync } from 'child_process';
+import { parsePR, fetchPRComments, checkoutPR, commitAndPush, waitForBugbotReview, fetchPRCommits, replyToThread, resolveThread } from './github.js';
+import { buildPrompt, runAI, checkAuth, getProviderName, validateComment, checkIfAddressed } from './ai.js';
 import {
   loadState,
   saveState,
@@ -16,6 +17,191 @@ import type { BusterOptions, PRComment, AIProvider } from './types.js';
 
 async function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Resolve-addressed mode: find unresolved comments that have been addressed and resolve them
+ */
+async function runResolveAddressed(options: BusterOptions): Promise<void> {
+  const { pr, dryRun, verbose, provider, authors } = options;
+
+  console.log(chalk.bold('\n🔍 Bugbot Buster — Resolve Addressed Mode\n'));
+  console.log(chalk.dim(`Using: ${getProviderName(provider)}`));
+  if (authors?.length) {
+    console.log(chalk.dim(`Filtering to authors: ${authors.join(', ')}`));
+  }
+  if (dryRun) {
+    console.log(chalk.yellow('DRY RUN — will not actually resolve threads'));
+  }
+  console.log('');
+
+  // Check AI provider auth
+  const authCheck = checkAuth(provider);
+  if (!authCheck.ok) {
+    const loginCmd = provider === 'codex' ? 'codex login' : 'claude (install from npm)';
+    console.error(chalk.red(`❌ ${getProviderName(provider)} not available. Run: ${loginCmd}`));
+    if (authCheck.message) {
+      console.error(chalk.dim(`   ${authCheck.message}`));
+    }
+    process.exit(1);
+  }
+
+  // Parse PR
+  const spinner = ora('Parsing PR...').start();
+  let prInfo;
+  try {
+    prInfo = parsePR(pr);
+    spinner.succeed(`PR: ${prInfo.owner}/${prInfo.repo}#${prInfo.number} (${prInfo.branch})`);
+  } catch (error) {
+    spinner.fail('Failed to parse PR');
+    console.error(error);
+    process.exit(1);
+  }
+
+  // Get working directory
+  const workdir = process.cwd();
+
+  // Checkout PR branch
+  spinner.start('Checking out PR branch...');
+  try {
+    checkoutPR(prInfo, workdir);
+    spinner.succeed(`Checked out branch: ${prInfo.branch}`);
+  } catch (error) {
+    spinner.fail('Failed to checkout PR');
+    console.error(error);
+    process.exit(1);
+  }
+
+  // Fetch comments
+  spinner.start('Fetching PR comments...');
+  let comments;
+  try {
+    comments = fetchPRComments(prInfo);
+    spinner.succeed(`Found ${comments.length} total review comments`);
+  } catch (error) {
+    spinner.fail('Failed to fetch comments');
+    console.error(error);
+    process.exit(1);
+  }
+
+  // Filter to unresolved only
+  let unresolved = comments.filter((c) => !c.isResolved);
+  if (authors?.length) {
+    unresolved = unresolved.filter((c) => authors.includes(c.author));
+  }
+
+  console.log(chalk.dim(`  Unresolved threads to check: ${unresolved.length}`));
+
+  if (unresolved.length === 0) {
+    console.log(chalk.green('\n✅ No unresolved comments to check!'));
+    return;
+  }
+
+  // Fetch PR commits for context
+  spinner.start('Fetching PR commits...');
+  const prCommits = fetchPRCommits(prInfo);
+  spinner.succeed(`Found ${prCommits.length} commits on PR`);
+
+  let resolvedCount = 0;
+  let unresolvedCount = 0;
+
+  for (const comment of unresolved) {
+    const preview = comment.body.slice(0, 60).replace(/\n/g, ' ');
+    spinner.start(`Checking: ${comment.path}:${comment.line ?? '?'} — ${preview}...`);
+
+    // Get current file content
+    let currentContent: string;
+    try {
+      currentContent = execSync(`git show HEAD:${comment.path}`, {
+        cwd: workdir,
+        encoding: 'utf-8',
+      });
+    } catch {
+      spinner.info(`File not found at HEAD: ${comment.path} — skipping`);
+      unresolvedCount++;
+      continue;
+    }
+
+    // Get recent commits that touched this file after the comment
+    let recentCommits: { sha: string; message: string; diff: string }[] = [];
+    try {
+      const log = execSync(
+        `git log --after="${comment.createdAt}" --format="%H %s" -- "${comment.path}"`,
+        { cwd: workdir, encoding: 'utf-8' }
+      ).trim();
+
+      if (log) {
+        recentCommits = log.split('\n').map((line) => {
+          const spaceIdx = line.indexOf(' ');
+          const sha = line.slice(0, spaceIdx);
+          const message = line.slice(spaceIdx + 1);
+          let diff = '';
+          try {
+            diff = execSync(`git show ${sha} -- "${comment.path}"`, {
+              cwd: workdir,
+              encoding: 'utf-8',
+            });
+          } catch {
+            // diff might fail, that's ok
+          }
+          return { sha, message, diff };
+        });
+      }
+    } catch {
+      // git log might fail, continue with empty commits
+    }
+
+    // Ask AI
+    const result = await checkIfAddressed(
+      provider,
+      comment,
+      currentContent,
+      recentCommits,
+      workdir,
+      verbose
+    );
+
+    if (result.addressed) {
+      const shortSha = result.commitSha ? result.commitSha.slice(0, 7) : '?';
+      const replyBody = result.commitSha
+        ? `✅ This appears to have been addressed in commit \`${shortSha}\` — ${result.explanation}`
+        : `✅ This appears to have been addressed — ${result.explanation}`;
+
+      if (dryRun) {
+        spinner.succeed(
+          chalk.green(`[DRY RUN] Would resolve: ${comment.path}:${comment.line ?? '?'} — ${result.explanation}`)
+        );
+      } else {
+        try {
+          replyToThread(prInfo, comment.threadId, replyBody);
+          resolveThread(comment.threadId);
+          spinner.succeed(
+            chalk.green(`Resolved: ${comment.path}:${comment.line ?? '?'} (${shortSha}) — ${result.explanation}`)
+          );
+        } catch (error) {
+          spinner.fail(`Failed to resolve thread: ${comment.path}:${comment.line ?? '?'}`);
+          if (verbose) console.error(error);
+          unresolvedCount++;
+          continue;
+        }
+      }
+      resolvedCount++;
+    } else {
+      spinner.info(
+        chalk.dim(`Not addressed: ${comment.path}:${comment.line ?? '?'} — ${result.explanation}`)
+      );
+      unresolvedCount++;
+    }
+  }
+
+  // Summary
+  console.log(chalk.bold('\n📊 Summary'));
+  console.log(chalk.green(`  ✅ Resolved: ${resolvedCount}`));
+  console.log(chalk.dim(`  ⏳ Still unresolved: ${unresolvedCount}`));
+  if (dryRun && resolvedCount > 0) {
+    console.log(chalk.yellow(`  (dry run — no threads were actually resolved)`));
+  }
+  console.log('');
 }
 
 async function run(options: BusterOptions): Promise<void> {
@@ -242,13 +428,14 @@ program
   .option('--validate', 'Validate comments before fixing (ignore invalid/false positives)')
   .option('--authors <list>', 'Only process comments from these authors (comma-separated)')
   .option('--wait-for-review', 'Wait for Bugbot to finish reviewing before next run (instead of fixed interval)')
+  .option('-r, --resolve-addressed', 'Find and resolve review threads that have already been addressed in code')
   .action((opts) => {
     const provider = opts.ai as AIProvider;
     if (provider !== 'codex' && provider !== 'claude') {
       console.error(chalk.red(`Invalid AI provider: ${opts.ai}. Use 'codex' or 'claude'`));
       process.exit(1);
     }
-    run({
+    const busterOpts: BusterOptions = {
       pr: opts.pr,
       interval: parseInt(opts.interval, 10),
       maxRuns: parseInt(opts.maxRuns, 10),
@@ -259,7 +446,11 @@ program
       validateComments: opts.validate ?? false,
       authors: opts.authors ? opts.authors.split(',').map((a: string) => a.trim()) : undefined,
       waitForReview: opts.waitForReview ?? false,
-    }).catch((error) => {
+      resolveAddressed: opts.resolveAddressed ?? false,
+    };
+
+    const handler = busterOpts.resolveAddressed ? runResolveAddressed : run;
+    handler(busterOpts).catch((error) => {
       console.error(chalk.red('Fatal error:'), error);
       process.exit(1);
     });

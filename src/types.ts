@@ -1,5 +1,6 @@
 export interface PRComment {
   id: number;
+  threadId: string;
   path: string;
   line: number | null;
   body: string;
@@ -44,4 +45,17 @@ export interface BusterOptions {
   validateComments: boolean;
   authors?: string[];
   waitForReview?: boolean;
+  resolveAddressed?: boolean;
+}
+
+export interface ResolveResult {
+  addressed: boolean;
+  commitSha?: string;
+  explanation: string;
+}
+
+export interface CommitInfo {
+  sha: string;
+  message: string;
+  date: string;
 }
