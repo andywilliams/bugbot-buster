@@ -1,4 +1,5 @@
 import { execSync, spawn } from 'child_process';
+import chalk from 'chalk';
 import type { PRComment, AIProvider, ResolveResult, CommitInfo } from './types.js';
 
 /**
@@ -229,21 +230,22 @@ A comment is VALID if:
 
 Respond with the JSON only:`;
 
-  if (provider === 'codex') {
-    return validateWithCodex(prompt, workdir, verbose, stream);
-  } else {
-    return validateWithClaude(prompt, workdir, verbose, stream);
-  }
+  return runValidation(provider, prompt, workdir, verbose, stream);
 }
 
-async function validateWithCodex(
+async function runValidation(
+  provider: AIProvider,
   prompt: string,
   workdir: string,
   verbose: boolean,
   stream: boolean = false
 ): Promise<{ valid: boolean; reason: string }> {
+  const cmd = provider === 'codex'
+    ? { bin: 'codex', args: ['exec', '--full-auto', prompt] }
+    : { bin: 'claude', args: ['--print', '--dangerously-skip-permissions', prompt] };
+
   return new Promise((resolve) => {
-    const proc = spawn('codex', ['exec', '--full-auto', prompt], {
+    const proc = spawn(cmd.bin, cmd.args, {
       cwd: workdir,
       stdio: 'pipe',
     });
@@ -251,73 +253,23 @@ async function validateWithCodex(
     let output = '';
     if (proc.stdout) {
       proc.stdout.on('data', (data) => {
-        const chunk = data.toString();
-        output += chunk;
-        if (stream || verbose) process.stdout.write(chunk);
+        output += data.toString();
       });
     }
     if (proc.stderr) {
       proc.stderr.on('data', (data) => {
-        const chunk = data.toString();
-        output += chunk;
-        if (stream || verbose) process.stderr.write(chunk);
+        output += data.toString();
       });
     }
 
     proc.on('close', () => {
-      try {
-        // Try to extract JSON from output
-        const jsonMatch = output.match(/\{[\s\S]*"valid"[\s\S]*\}/);
-        if (jsonMatch) {
-          const result = JSON.parse(jsonMatch[0]);
-          resolve({ valid: !!result.valid, reason: result.reason || '' });
-        } else {
-          if (verbose) console.log('Could not parse validation response:', output);
-          resolve({ valid: true, reason: 'Could not parse response, assuming valid' });
-        }
-      } catch {
-        if (verbose) console.log('Error parsing validation response:', output);
-        resolve({ valid: true, reason: 'Parse error, assuming valid' });
+      // Dump full output when streaming (Claude --print buffers everything)
+      if ((stream || verbose) && output.trim()) {
+        console.log(chalk.dim('--- AI output ---'));
+        console.log(output.trim());
+        console.log(chalk.dim('--- end ---'));
       }
-    });
-
-    proc.on('error', () => {
-      resolve({ valid: true, reason: 'Validation failed, assuming valid' });
-    });
-  });
-}
-
-async function validateWithClaude(
-  prompt: string,
-  workdir: string,
-  verbose: boolean,
-  stream: boolean = false
-): Promise<{ valid: boolean; reason: string }> {
-  return new Promise((resolve) => {
-    const proc = spawn('claude', ['--print', '--dangerously-skip-permissions', prompt], {
-      cwd: workdir,
-      stdio: 'pipe',
-    });
-
-    let output = '';
-    if (proc.stdout) {
-      proc.stdout.on('data', (data) => {
-        const chunk = data.toString();
-        output += chunk;
-        if (stream || verbose) process.stdout.write(chunk);
-      });
-    }
-    if (proc.stderr) {
-      proc.stderr.on('data', (data) => {
-        const chunk = data.toString();
-        output += chunk;
-        if (stream || verbose) process.stderr.write(chunk);
-      });
-    }
-
-    proc.on('close', () => {
       try {
-        // Try to extract JSON from output
         const jsonMatch = output.match(/\{[\s\S]*"valid"[\s\S]*\}/);
         if (jsonMatch) {
           const result = JSON.parse(jsonMatch[0]);
@@ -405,13 +357,12 @@ async function runResolveCheck(
   verbose: boolean,
   stream: boolean = false
 ): Promise<ResolveResult> {
-  const cmd =
-    provider === 'codex'
-      ? ['codex', ['exec', '--full-auto', prompt]]
-      : ['claude', ['--print', '--dangerously-skip-permissions', prompt]];
+  const cmd = provider === 'codex'
+    ? { bin: 'codex', args: ['exec', '--full-auto', prompt] }
+    : { bin: 'claude', args: ['--print', '--dangerously-skip-permissions', prompt] };
 
   return new Promise((resolve) => {
-    const proc = spawn(cmd[0] as string, cmd[1] as string[], {
+    const proc = spawn(cmd.bin, cmd.args, {
       cwd: workdir,
       stdio: 'pipe',
     });
@@ -419,20 +370,22 @@ async function runResolveCheck(
     let output = '';
     if (proc.stdout) {
       proc.stdout.on('data', (data) => {
-        const chunk = data.toString();
-        output += chunk;
-        if (stream || verbose) process.stdout.write(chunk);
+        output += data.toString();
       });
     }
     if (proc.stderr) {
       proc.stderr.on('data', (data) => {
-        const chunk = data.toString();
-        output += chunk;
-        if (stream || verbose) process.stderr.write(chunk);
+        output += data.toString();
       });
     }
 
     proc.on('close', () => {
+      // Dump full output when streaming (Claude --print buffers everything)
+      if ((stream || verbose) && output.trim()) {
+        console.log(chalk.dim('--- AI output ---'));
+        console.log(output.trim());
+        console.log(chalk.dim('--- end ---'));
+      }
       try {
         const jsonMatch = output.match(/\{[\s\S]*"addressed"[\s\S]*\}/);
         if (jsonMatch) {
