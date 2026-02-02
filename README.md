@@ -88,11 +88,14 @@ bugbot-buster --pr #123 --validate
 bugbot-buster --pr #123 --authors cursor
 bugbot-buster --pr #123 --authors "cursor,dependabot,my-tech-lead"
 
+# Stream AI output in real-time (see what the AI is thinking)
+bugbot-buster --pr #123 --stream
+
 # Resolve addressed comments (cleanup stale threads)
 bugbot-buster --pr #123 --resolve-addressed
 
-# Resolve + filter to specific authors
-bugbot-buster --pr #123 --resolve-addressed --authors cursor
+# Resolve + filter to specific authors + stream output
+bugbot-buster --pr #123 --resolve-addressed --authors cursor --stream
 
 # Dry run resolve (see what would be resolved without acting)
 bugbot-buster --pr #123 --resolve-addressed --dry-run
@@ -111,6 +114,7 @@ bugbot-buster --pr #123 --resolve-addressed --dry-run
 | `-s, --sign` | Sign commits with GPG | false |
 | `--validate` | Validate comments, ignore invalid | false |
 | `--authors <list>` | Only process comments from these authors (comma-separated) | all |
+| `--stream` | Stream AI output to the terminal in real-time | false |
 | `-r, --resolve-addressed` | Find and resolve already-addressed comments | false |
 
 ## How it works

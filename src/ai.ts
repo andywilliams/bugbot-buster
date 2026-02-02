@@ -41,12 +41,13 @@ export async function runAI(
   provider: AIProvider,
   prompt: string,
   workdir: string,
-  verbose: boolean
+  verbose: boolean,
+  stream: boolean = false
 ): Promise<boolean> {
   if (provider === 'codex') {
-    return runCodex(prompt, workdir, verbose);
+    return runCodex(prompt, workdir, verbose, stream);
   } else {
-    return runClaude(prompt, workdir, verbose);
+    return runClaude(prompt, workdir, verbose, stream);
   }
 }
 
@@ -56,7 +57,8 @@ export async function runAI(
 async function runCodex(
   prompt: string,
   workdir: string,
-  verbose: boolean
+  verbose: boolean,
+  stream: boolean = false
 ): Promise<boolean> {
   return new Promise((resolve) => {
     const args = ['exec', '--full-auto', prompt];
@@ -65,20 +67,21 @@ async function runCodex(
       console.log('Running Codex with prompt:', prompt.slice(0, 200) + '...');
     }
 
+    const useInherit = verbose || stream;
     const proc = spawn('codex', args, {
       cwd: workdir,
-      stdio: verbose ? 'inherit' : 'pipe',
+      stdio: useInherit ? 'inherit' : 'pipe',
     });
 
     let output = '';
 
-    if (!verbose && proc.stdout) {
+    if (!useInherit && proc.stdout) {
       proc.stdout.on('data', (data) => {
         output += data.toString();
       });
     }
 
-    if (!verbose && proc.stderr) {
+    if (!useInherit && proc.stderr) {
       proc.stderr.on('data', (data) => {
         output += data.toString();
       });
@@ -88,7 +91,7 @@ async function runCodex(
       if (code === 0) {
         resolve(true);
       } else {
-        if (!verbose) {
+        if (!useInherit) {
           console.error('Codex failed:', output);
         }
         resolve(false);
@@ -108,7 +111,8 @@ async function runCodex(
 async function runClaude(
   prompt: string,
   workdir: string,
-  verbose: boolean
+  verbose: boolean,
+  stream: boolean = false
 ): Promise<boolean> {
   return new Promise((resolve) => {
     // Claude Code CLI uses --print for non-interactive mode with --dangerously-skip-permissions
@@ -122,20 +126,21 @@ async function runClaude(
       console.log('Running Claude with prompt:', prompt.slice(0, 200) + '...');
     }
 
+    const useInherit = verbose || stream;
     const proc = spawn('claude', args, {
       cwd: workdir,
-      stdio: verbose ? 'inherit' : 'pipe',
+      stdio: useInherit ? 'inherit' : 'pipe',
     });
 
     let output = '';
 
-    if (!verbose && proc.stdout) {
+    if (!useInherit && proc.stdout) {
       proc.stdout.on('data', (data) => {
         output += data.toString();
       });
     }
 
-    if (!verbose && proc.stderr) {
+    if (!useInherit && proc.stderr) {
       proc.stderr.on('data', (data) => {
         output += data.toString();
       });
@@ -145,7 +150,7 @@ async function runClaude(
       if (code === 0) {
         resolve(true);
       } else {
-        if (!verbose) {
+        if (!useInherit) {
           console.error('Claude failed:', output);
         }
         resolve(false);
@@ -197,7 +202,8 @@ export async function validateComment(
   provider: AIProvider,
   comment: PRComment,
   workdir: string,
-  verbose: boolean
+  verbose: boolean,
+  stream: boolean = false
 ): Promise<{ valid: boolean; reason: string }> {
   const prompt = `You are evaluating a code review comment to determine if it's a valid, actionable issue.
 
@@ -224,16 +230,17 @@ A comment is VALID if:
 Respond with the JSON only:`;
 
   if (provider === 'codex') {
-    return validateWithCodex(prompt, workdir, verbose);
+    return validateWithCodex(prompt, workdir, verbose, stream);
   } else {
-    return validateWithClaude(prompt, workdir, verbose);
+    return validateWithClaude(prompt, workdir, verbose, stream);
   }
 }
 
 async function validateWithCodex(
   prompt: string,
   workdir: string,
-  verbose: boolean
+  verbose: boolean,
+  stream: boolean = false
 ): Promise<{ valid: boolean; reason: string }> {
   return new Promise((resolve) => {
     const proc = spawn('codex', ['exec', '--full-auto', prompt], {
@@ -244,12 +251,16 @@ async function validateWithCodex(
     let output = '';
     if (proc.stdout) {
       proc.stdout.on('data', (data) => {
-        output += data.toString();
+        const chunk = data.toString();
+        output += chunk;
+        if (stream || verbose) process.stdout.write(chunk);
       });
     }
     if (proc.stderr) {
       proc.stderr.on('data', (data) => {
-        output += data.toString();
+        const chunk = data.toString();
+        output += chunk;
+        if (stream || verbose) process.stderr.write(chunk);
       });
     }
 
@@ -279,7 +290,8 @@ async function validateWithCodex(
 async function validateWithClaude(
   prompt: string,
   workdir: string,
-  verbose: boolean
+  verbose: boolean,
+  stream: boolean = false
 ): Promise<{ valid: boolean; reason: string }> {
   return new Promise((resolve) => {
     const proc = spawn('claude', ['--print', '--dangerously-skip-permissions', prompt], {
@@ -290,12 +302,16 @@ async function validateWithClaude(
     let output = '';
     if (proc.stdout) {
       proc.stdout.on('data', (data) => {
-        output += data.toString();
+        const chunk = data.toString();
+        output += chunk;
+        if (stream || verbose) process.stdout.write(chunk);
       });
     }
     if (proc.stderr) {
       proc.stderr.on('data', (data) => {
-        output += data.toString();
+        const chunk = data.toString();
+        output += chunk;
+        if (stream || verbose) process.stderr.write(chunk);
       });
     }
 
@@ -332,7 +348,8 @@ export async function checkIfAddressed(
   currentFileContent: string,
   recentCommits: { sha: string; message: string; diff: string }[],
   workdir: string,
-  verbose: boolean
+  verbose: boolean,
+  stream: boolean = false
 ): Promise<ResolveResult> {
   const lineContext = comment.line
     ? (() => {
@@ -378,14 +395,15 @@ Has this review comment been addressed? Look at the comment, the current state o
 Respond with ONLY a JSON object (no markdown, no explanation):
 {"addressed": true/false, "commitSha": "full_sha_if_addressed_or_null", "explanation": "brief description of what changed or why it's not addressed"}`;
 
-  return runResolveCheck(provider, prompt, workdir, verbose);
+  return runResolveCheck(provider, prompt, workdir, verbose, stream);
 }
 
 async function runResolveCheck(
   provider: AIProvider,
   prompt: string,
   workdir: string,
-  verbose: boolean
+  verbose: boolean,
+  stream: boolean = false
 ): Promise<ResolveResult> {
   const cmd =
     provider === 'codex'
@@ -401,12 +419,16 @@ async function runResolveCheck(
     let output = '';
     if (proc.stdout) {
       proc.stdout.on('data', (data) => {
-        output += data.toString();
+        const chunk = data.toString();
+        output += chunk;
+        if (stream || verbose) process.stdout.write(chunk);
       });
     }
     if (proc.stderr) {
       proc.stderr.on('data', (data) => {
-        output += data.toString();
+        const chunk = data.toString();
+        output += chunk;
+        if (stream || verbose) process.stderr.write(chunk);
       });
     }
 
