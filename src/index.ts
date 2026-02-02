@@ -151,7 +151,11 @@ async function runResolveAddressed(options: BusterOptions): Promise<void> {
       // git log might fail, continue with empty commits
     }
 
-    // Ask AI
+    // Ask AI — stop spinner if streaming so output can flow through
+    if (stream) {
+      spinner.stop();
+      console.log(chalk.cyan(`\n🤖 Checking: ${comment.path}:${comment.line ?? '?'}\n`));
+    }
     const result = await checkIfAddressed(
       provider,
       comment,
@@ -161,6 +165,7 @@ async function runResolveAddressed(options: BusterOptions): Promise<void> {
       verbose,
       stream
     );
+    if (stream) console.log(''); // blank line after AI output
 
     if (result.addressed) {
       const shortSha = result.commitSha ? result.commitSha.slice(0, 7) : '?';
@@ -318,8 +323,14 @@ async function run(options: BusterOptions): Promise<void> {
       const validated: PRComment[] = [];
       
       for (const comment of unaddressed) {
-        spinner.start(`Validating: ${comment.path}:${comment.line ?? '?'}...`);
+        if (stream) {
+          spinner.stop();
+          console.log(chalk.cyan(`\n🤖 Validating: ${comment.path}:${comment.line ?? '?'}\n`));
+        } else {
+          spinner.start(`Validating: ${comment.path}:${comment.line ?? '?'}...`);
+        }
         const result = await validateComment(provider, comment, workdir, verbose, stream);
+        if (stream) console.log('');
         
         if (result.valid) {
           spinner.succeed(chalk.green(`Valid: ${result.reason}`));
@@ -355,8 +366,14 @@ async function run(options: BusterOptions): Promise<void> {
 
     // Run AI to fix issues
     const prompt = buildPrompt(toFix);
-    spinner.start(`Running ${getProviderName(provider)} to fix issues...`);
+    if (stream) {
+      spinner.stop();
+      console.log(chalk.cyan(`\n🤖 Running ${getProviderName(provider)} to fix issues...\n`));
+    } else {
+      spinner.start(`Running ${getProviderName(provider)} to fix issues...`);
+    }
     const success = await runAI(provider, prompt, workdir, verbose, stream);
+    if (stream) console.log('');
 
     if (!success) {
       spinner.fail(`${getProviderName(provider)} failed to fix issues`);
