@@ -1,5 +1,5 @@
 import { execSync } from 'child_process';
-import type { PRComment, PRInfo } from './types.js';
+import type { PRComment, PRInfo, CommitInfo } from './types.js';
 
 /**
  * Parse PR identifier (owner/repo#123 or just #123 if in repo)
@@ -48,6 +48,7 @@ export function fetchPRComments(pr: PRInfo): PRComment[] {
         pullRequest(number: $number) {
           reviewThreads(first: 100) {
             nodes {
+              id
               isResolved
               comments(first: 10) {
                 nodes {
@@ -84,6 +85,7 @@ export function fetchPRComments(pr: PRInfo): PRComment[] {
     if (comment) {
       comments.push({
         id: comment.databaseId,
+        threadId: thread.id,
         path: comment.path,
         line: comment.line,
         body: comment.body,
@@ -150,6 +152,60 @@ export function checkoutPR(pr: PRInfo, workdir: string): void {
     cwd: workdir,
     stdio: 'inherit',
   });
+}
+
+/**
+ * Fetch commits on a PR
+ */
+export function fetchPRCommits(pr: PRInfo): CommitInfo[] {
+  const result = JSON.parse(
+    execSync(
+      `gh pr view ${pr.number} --repo ${pr.owner}/${pr.repo} --json commits`,
+      { encoding: 'utf-8' }
+    )
+  );
+
+  return (result.commits ?? []).map((c: { oid: string; messageHeadline: string; committedDate: string }) => ({
+    sha: c.oid,
+    message: c.messageHeadline,
+    date: c.committedDate,
+  }));
+}
+
+/**
+ * Reply to a review thread using GraphQL
+ */
+export function replyToThread(pr: PRInfo, threadId: string, body: string): void {
+  const mutation = `
+    mutation($threadId: ID!, $body: String!) {
+      addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $threadId, body: $body }) {
+        comment { id }
+      }
+    }
+  `;
+
+  execSync(
+    `gh api graphql -f query='${mutation}' -F threadId='${threadId}' -F body='${body.replace(/'/g, "'\\''")}'`,
+    { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
+  );
+}
+
+/**
+ * Resolve a review thread using GraphQL
+ */
+export function resolveThread(threadId: string): void {
+  const mutation = `
+    mutation($threadId: ID!) {
+      resolveReviewThread(input: { threadId: $threadId }) {
+        thread { isResolved }
+      }
+    }
+  `;
+
+  execSync(
+    `gh api graphql -f query='${mutation}' -F threadId='${threadId}'`,
+    { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
+  );
 }
 
 /**

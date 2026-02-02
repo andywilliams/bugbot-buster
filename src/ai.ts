@@ -1,5 +1,5 @@
 import { execSync, spawn } from 'child_process';
-import type { PRComment, AIProvider } from './types.js';
+import type { PRComment, AIProvider, ResolveResult, CommitInfo } from './types.js';
 
 /**
  * Build a prompt from comments grouped by file
@@ -318,6 +318,121 @@ async function validateWithClaude(
 
     proc.on('error', () => {
       resolve({ valid: true, reason: 'Validation failed, assuming valid' });
+    });
+  });
+}
+
+/**
+ * Check if a review comment has already been addressed in recent commits.
+ * Returns whether it was addressed, which commit likely fixed it, and an explanation.
+ */
+export async function checkIfAddressed(
+  provider: AIProvider,
+  comment: PRComment,
+  currentFileContent: string,
+  recentCommits: { sha: string; message: string; diff: string }[],
+  workdir: string,
+  verbose: boolean
+): Promise<ResolveResult> {
+  const lineContext = comment.line
+    ? (() => {
+        const lines = currentFileContent.split('\n');
+        const start = Math.max(0, comment.line - 10);
+        const end = Math.min(lines.length, comment.line + 10);
+        return lines
+          .slice(start, end)
+          .map((l, i) => {
+            const lineNum = start + i + 1;
+            const marker = lineNum === comment.line ? ' >>>' : '    ';
+            return `${marker}${lineNum}: ${l}`;
+          })
+          .join('\n');
+      })()
+    : currentFileContent.slice(0, 3000);
+
+  const commitsContext = recentCommits
+    .map(
+      (c) =>
+        `### Commit ${c.sha.slice(0, 7)}: ${c.message}\n\`\`\`diff\n${c.diff.slice(0, 2000)}\n\`\`\``
+    )
+    .join('\n\n');
+
+  const prompt = `You are evaluating whether a code review comment has been addressed by subsequent commits.
+
+## Review Comment
+File: ${comment.path}${comment.line ? ` (line ${comment.line})` : ''}
+Author: ${comment.author}
+Comment: ${comment.body}
+
+## Current File Content (around the relevant area)
+\`\`\`
+${lineContext}
+\`\`\`
+
+## Recent Commits That Touched This File
+${commitsContext || '(No recent commits touched this file)'}
+
+## Task
+Has this review comment been addressed? Look at the comment, the current state of the file, and the commit diffs.
+
+Respond with ONLY a JSON object (no markdown, no explanation):
+{"addressed": true/false, "commitSha": "full_sha_if_addressed_or_null", "explanation": "brief description of what changed or why it's not addressed"}`;
+
+  return runResolveCheck(provider, prompt, workdir, verbose);
+}
+
+async function runResolveCheck(
+  provider: AIProvider,
+  prompt: string,
+  workdir: string,
+  verbose: boolean
+): Promise<ResolveResult> {
+  const cmd =
+    provider === 'codex'
+      ? ['codex', ['exec', '--full-auto', prompt]]
+      : ['claude', ['--print', '--dangerously-skip-permissions', prompt]];
+
+  return new Promise((resolve) => {
+    const proc = spawn(cmd[0] as string, cmd[1] as string[], {
+      cwd: workdir,
+      stdio: 'pipe',
+    });
+
+    let output = '';
+    if (proc.stdout) {
+      proc.stdout.on('data', (data) => {
+        output += data.toString();
+      });
+    }
+    if (proc.stderr) {
+      proc.stderr.on('data', (data) => {
+        output += data.toString();
+      });
+    }
+
+    proc.on('close', () => {
+      try {
+        const jsonMatch = output.match(/\{[\s\S]*"addressed"[\s\S]*\}/);
+        if (jsonMatch) {
+          const result = JSON.parse(jsonMatch[0]);
+          resolve({
+            addressed: !!result.addressed,
+            commitSha: result.commitSha ?? undefined,
+            explanation: result.explanation || '',
+          });
+        } else {
+          if (verbose) console.log('Could not parse resolve-check response:', output);
+          resolve({ addressed: false, explanation: 'Could not parse AI response' });
+        }
+      } catch {
+        if (verbose) console.log('Error parsing resolve-check response:', output);
+        resolve({ addressed: false, explanation: 'Parse error in AI response' });
+      }
+    });
+
+    proc.on('error', (error) => {
+      if (verbose) console.error('Failed to run resolve check:', error);
+      resolve({ addressed: false, explanation: 'AI provider error' });
     });
   });
 }
