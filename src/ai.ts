@@ -109,6 +109,46 @@ async function runCodex(
 /**
  * Run Claude Code CLI
  */
+/**
+ * Extract text content from Claude stream-json output.
+ * Parses JSON lines and concatenates text_delta values.
+ */
+function extractTextFromStreamJson(raw: string): string {
+  let text = '';
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const event = JSON.parse(line);
+      const delta = event?.event?.delta?.text;
+      if (delta) text += delta;
+      const content = event?.message?.content;
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          if (block.text) text += block.text;
+        }
+      }
+    } catch {
+      // Not a JSON line — plain text (codex output)
+      text += line + '\n';
+    }
+  }
+  return text;
+}
+
+/**
+ * Parse and stream text deltas from a chunk of stream-json output
+ */
+function streamJsonChunk(chunk: string): void {
+  for (const line of chunk.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const event = JSON.parse(line);
+      const text = event?.event?.delta?.text;
+      if (text) process.stdout.write(text);
+    } catch { /* skip non-JSON lines */ }
+  }
+}
+
 async function runClaude(
   prompt: string,
   workdir: string,
@@ -116,9 +156,9 @@ async function runClaude(
   stream: boolean = false
 ): Promise<boolean> {
   return new Promise((resolve) => {
-    // Claude Code CLI uses --print for non-interactive mode with --dangerously-skip-permissions
     const args = [
       '--print',
+      ...(stream ? ['--output-format', 'stream-json'] : []),
       '--dangerously-skip-permissions',
       prompt,
     ];
@@ -127,7 +167,7 @@ async function runClaude(
       console.log('Running Claude with prompt:', prompt.slice(0, 200) + '...');
     }
 
-    const useInherit = verbose || stream;
+    const useInherit = verbose && !stream;
     const proc = spawn('claude', args, {
       cwd: workdir,
       stdio: useInherit ? 'inherit' : 'pipe',
@@ -137,7 +177,9 @@ async function runClaude(
 
     if (!useInherit && proc.stdout) {
       proc.stdout.on('data', (data) => {
-        output += data.toString();
+        const chunk = data.toString();
+        output += chunk;
+        if (stream) streamJsonChunk(chunk);
       });
     }
 
@@ -148,10 +190,11 @@ async function runClaude(
     }
 
     proc.on('close', (code) => {
+      if (stream) process.stdout.write('\n');
       if (code === 0) {
         resolve(true);
       } else {
-        if (!useInherit) {
+        if (!useInherit && !stream) {
           console.error('Claude failed:', output);
         }
         resolve(false);
@@ -240,9 +283,15 @@ async function runValidation(
   verbose: boolean,
   stream: boolean = false
 ): Promise<{ valid: boolean; reason: string }> {
+  const isStreamClaude = stream && provider === 'claude';
   const cmd = provider === 'codex'
     ? { bin: 'codex', args: ['exec', '--full-auto', prompt] }
-    : { bin: 'claude', args: ['--print', '--dangerously-skip-permissions', prompt] };
+    : { bin: 'claude', args: [
+        '--print',
+        ...(isStreamClaude ? ['--output-format', 'stream-json'] : []),
+        '--dangerously-skip-permissions',
+        prompt,
+      ] };
 
   return new Promise((resolve) => {
     const proc = spawn(cmd.bin, cmd.args, {
@@ -253,7 +302,12 @@ async function runValidation(
     let output = '';
     if (proc.stdout) {
       proc.stdout.on('data', (data) => {
-        output += data.toString();
+        const chunk = data.toString();
+        output += chunk;
+        if (stream) {
+          if (isStreamClaude) streamJsonChunk(chunk);
+          else process.stdout.write(chunk);
+        }
       });
     }
     if (proc.stderr) {
@@ -263,23 +317,25 @@ async function runValidation(
     }
 
     proc.on('close', () => {
-      // Dump full output when streaming (Claude --print buffers everything)
-      if ((stream || verbose) && output.trim()) {
+      if (stream) process.stdout.write('\n');
+      const textOutput = isStreamClaude ? extractTextFromStreamJson(output) : output;
+
+      if (verbose && !stream && textOutput.trim()) {
         console.log(chalk.dim('--- AI output ---'));
-        console.log(output.trim());
+        console.log(textOutput.trim());
         console.log(chalk.dim('--- end ---'));
       }
       try {
-        const jsonMatch = output.match(/\{[\s\S]*"valid"[\s\S]*\}/);
+        const jsonMatch = textOutput.match(/\{[\s\S]*"valid"[\s\S]*\}/);
         if (jsonMatch) {
           const result = JSON.parse(jsonMatch[0]);
           resolve({ valid: !!result.valid, reason: result.reason || '' });
         } else {
-          if (verbose) console.log('Could not parse validation response:', output);
+          if (verbose) console.log('Could not parse validation response:', textOutput);
           resolve({ valid: true, reason: 'Could not parse response, assuming valid' });
         }
       } catch {
-        if (verbose) console.log('Error parsing validation response:', output);
+        if (verbose) console.log('Error parsing validation response:', textOutput);
         resolve({ valid: true, reason: 'Parse error, assuming valid' });
       }
     });
@@ -357,9 +413,15 @@ async function runResolveCheck(
   verbose: boolean,
   stream: boolean = false
 ): Promise<ResolveResult> {
+  const isStreamClaude = stream && provider === 'claude';
   const cmd = provider === 'codex'
     ? { bin: 'codex', args: ['exec', '--full-auto', prompt] }
-    : { bin: 'claude', args: ['--print', '--dangerously-skip-permissions', prompt] };
+    : { bin: 'claude', args: [
+        '--print',
+        ...(isStreamClaude ? ['--output-format', 'stream-json'] : []),
+        '--dangerously-skip-permissions',
+        prompt,
+      ] };
 
   return new Promise((resolve) => {
     const proc = spawn(cmd.bin, cmd.args, {
@@ -370,7 +432,12 @@ async function runResolveCheck(
     let output = '';
     if (proc.stdout) {
       proc.stdout.on('data', (data) => {
-        output += data.toString();
+        const chunk = data.toString();
+        output += chunk;
+        if (stream) {
+          if (isStreamClaude) streamJsonChunk(chunk);
+          else process.stdout.write(chunk);
+        }
       });
     }
     if (proc.stderr) {
@@ -380,14 +447,16 @@ async function runResolveCheck(
     }
 
     proc.on('close', () => {
-      // Dump full output when streaming (Claude --print buffers everything)
-      if ((stream || verbose) && output.trim()) {
+      if (stream) process.stdout.write('\n');
+      const textOutput = isStreamClaude ? extractTextFromStreamJson(output) : output;
+
+      if (verbose && !stream && textOutput.trim()) {
         console.log(chalk.dim('--- AI output ---'));
-        console.log(output.trim());
+        console.log(textOutput.trim());
         console.log(chalk.dim('--- end ---'));
       }
       try {
-        const jsonMatch = output.match(/\{[\s\S]*"addressed"[\s\S]*\}/);
+        const jsonMatch = textOutput.match(/\{[\s\S]*"addressed"[\s\S]*\}/);
         if (jsonMatch) {
           const result = JSON.parse(jsonMatch[0]);
           resolve({
@@ -396,11 +465,11 @@ async function runResolveCheck(
             explanation: result.explanation || '',
           });
         } else {
-          if (verbose) console.log('Could not parse resolve-check response:', output);
+          if (verbose) console.log('Could not parse resolve-check response:', textOutput);
           resolve({ addressed: false, explanation: 'Could not parse AI response' });
         }
       } catch {
-        if (verbose) console.log('Error parsing resolve-check response:', output);
+        if (verbose) console.log('Error parsing resolve-check response:', textOutput);
         resolve({ addressed: false, explanation: 'Parse error in AI response' });
       }
     });
