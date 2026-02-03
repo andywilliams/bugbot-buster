@@ -326,7 +326,7 @@ async function runValidation(
         console.log(chalk.dim('--- end ---'));
       }
       try {
-        const jsonMatch = textOutput.match(/\{[\s\S]*"valid"[\s\S]*\}/);
+        const jsonMatch = textOutput.match(/\{"valid"\s*:[\s\S]*?\}/);
         if (jsonMatch) {
           const result = JSON.parse(jsonMatch[0]);
           resolve({ valid: !!result.valid, reason: result.reason || '' });
@@ -456,7 +456,7 @@ async function runResolveCheck(
         console.log(chalk.dim('--- end ---'));
       }
       try {
-        const jsonMatch = textOutput.match(/\{[\s\S]*"addressed"[\s\S]*\}/);
+        const jsonMatch = textOutput.match(/\{"addressed"\s*:[\s\S]*?\}/);
         if (jsonMatch) {
           const result = JSON.parse(jsonMatch[0]);
           resolve({
