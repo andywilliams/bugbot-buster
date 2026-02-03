@@ -326,7 +326,7 @@ async function runValidation(
         console.log(chalk.dim('--- end ---'));
       }
       try {
-        const jsonMatch = textOutput.match(/\{"valid"\s*:[\s\S]*?\}/);
+        const jsonMatch = textOutput.match(/\{"valid"\s*:\s*(?:true|false)\s*,[\s\S]*?\}/);
         if (jsonMatch) {
           const result = JSON.parse(jsonMatch[0]);
           resolve({ valid: !!result.valid, reason: result.reason || '' });
@@ -456,7 +456,7 @@ async function runResolveCheck(
         console.log(chalk.dim('--- end ---'));
       }
       try {
-        const jsonMatch = textOutput.match(/\{"addressed"\s*:[\s\S]*?\}/);
+        const jsonMatch = textOutput.match(/\{"addressed"\s*:\s*(?:true|false)\s*,[\s\S]*?\}/);
         if (jsonMatch) {
           const result = JSON.parse(jsonMatch[0]);
           resolve({
@@ -468,8 +468,8 @@ async function runResolveCheck(
           if (verbose) console.log('Could not parse resolve-check response:', textOutput);
           resolve({ addressed: false, explanation: 'Could not parse AI response' });
         }
-      } catch {
-        if (verbose) console.log('Error parsing resolve-check response:', textOutput);
+      } catch (err) {
+        if (verbose) console.log('Error parsing resolve-check response:', (err as Error).message);
         resolve({ addressed: false, explanation: 'Parse error in AI response' });
       }
     });
