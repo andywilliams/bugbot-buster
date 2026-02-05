@@ -29,27 +29,15 @@ Automated PR review comment fixer using AI coding assistants.
 
 ## Installation
 
-### From source (recommended)
-
 ```bash
-# Clone the repo
 git clone https://github.com/andywilliams/bugbot-buster.git
 cd bugbot-buster
-
-# Install dependencies and build
 npm install
 npm run build
-
-# Run from the repo directory
-node dist/index.js --pr owner/repo#123
+npm link   # makes `bugbot-buster` available globally
 ```
 
-### Global install (coming soon)
-
-```bash
-npm install -g bugbot-buster
-bugbot-buster --pr owner/repo#123
-```
+Now you can run `bugbot-buster` from any repo.
 
 ## Usage
 
