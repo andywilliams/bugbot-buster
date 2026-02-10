@@ -258,7 +258,7 @@ async function run(options: BusterOptions): Promise<void> {
   }
 
   // Load state
-  let state = loadState(workdir);
+  let state = loadState(workdir, prInfo);
   console.log(
     chalk.dim(`Previously addressed: ${state.addressedCommentIds.length} comments, ignored: ${state.ignoredCommentIds.length}`)
   );
@@ -346,7 +346,7 @@ async function run(options: BusterOptions): Promise<void> {
       // Save ignored comments
       if (ignoredIds.length > 0) {
         state = markIgnored(state, ignoredIds);
-        saveState(workdir, state);
+        saveState(workdir, state, prInfo);
         console.log(chalk.dim(`\nMarked ${ignoredIds.length} comments as ignored`));
       }
       
@@ -402,7 +402,7 @@ async function run(options: BusterOptions): Promise<void> {
       commentsAddressed: toFix.length,
       commitSha: sha ?? undefined,
     });
-    saveState(workdir, state);
+    saveState(workdir, state, prInfo);
 
     // Wait before next run
     if (runCount < maxRuns) {

@@ -1,22 +1,35 @@
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
-import type { BusterState, RunRecord } from './types.js';
+import { homedir } from 'os';
+import type { BusterState, RunRecord, PRInfo } from './types.js';
 
-const STATE_FILE = '.bugbot-state.json';
+const STATE_DIR = join(homedir(), '.bugbot-buster');
+
+/**
+ * Get the state file path for a specific repo and PR
+ * ~/.bugbot-buster/{owner}/{repo}/pr-{number}.json
+ */
+function getStatePath(prInfo: PRInfo): string {
+  return join(STATE_DIR, prInfo.owner, prInfo.repo, `pr-${prInfo.number}.json`);
+}
 
 /**
  * Load state from file
  */
-export function loadState(workdir: string): BusterState {
-  const statePath = join(workdir, STATE_FILE);
+export function loadState(_workdir: string, prInfo?: PRInfo): BusterState {
+  const empty: BusterState = {
+    addressedCommentIds: [],
+    ignoredCommentIds: [],
+    lastRun: '',
+    runs: [],
+  };
+
+  if (!prInfo) return empty;
+
+  const statePath = getStatePath(prInfo);
 
   if (!existsSync(statePath)) {
-    return {
-      addressedCommentIds: [],
-      ignoredCommentIds: [],
-      lastRun: '',
-      runs: [],
-    };
+    return empty;
   }
 
   try {
@@ -28,20 +41,19 @@ export function loadState(workdir: string): BusterState {
       ignoredCommentIds: state.ignoredCommentIds || [],
     };
   } catch {
-    return {
-      addressedCommentIds: [],
-      ignoredCommentIds: [],
-      lastRun: '',
-      runs: [],
-    };
+    return empty;
   }
 }
 
 /**
  * Save state to file
  */
-export function saveState(workdir: string, state: BusterState): void {
-  const statePath = join(workdir, STATE_FILE);
+export function saveState(_workdir: string, state: BusterState, prInfo?: PRInfo): void {
+  if (!prInfo) return;
+
+  const statePath = getStatePath(prInfo);
+  const dir = join(STATE_DIR, prInfo.owner, prInfo.repo);
+  mkdirSync(dir, { recursive: true });
   writeFileSync(statePath, JSON.stringify(state, null, 2));
 }
 
