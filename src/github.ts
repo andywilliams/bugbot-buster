@@ -2,9 +2,21 @@ import { execSync } from 'child_process';
 import type { PRComment, PRInfo, CommitInfo } from './types.js';
 
 /**
- * Parse PR identifier (owner/repo#123 or just #123 if in repo)
+ * Parse PR identifier (owner/repo#123 or just #123 if in repo).
+ * Also accepts "current" or "." to use the PR for the current branch (via gh pr view).
  */
 export function parsePR(pr: string): PRInfo {
+  if (pr === 'current' || pr === '.') {
+    const originalInput = pr;
+    try {
+      pr = '#' + execSync('gh pr view --json number -q .number', { encoding: 'utf-8' }).trim();
+    } catch {
+      throw new Error(
+        `Failed to resolve PR "${originalInput}". No open PR found for current branch. Use owner/repo#123 or #123 instead.`
+      );
+    }
+  }
+
   const match = pr.match(/^(?:([^/]+)\/([^#]+))?#?(\d+)$/);
   if (!match) {
     throw new Error(`Invalid PR format: ${pr}. Use owner/repo#123 or #123`);

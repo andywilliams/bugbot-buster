@@ -51,6 +51,10 @@ node /path/to/bugbot-buster/dist/index.js --pr #123
 # Or with global install:
 bugbot-buster --pr #123
 
+# Use current branch's PR (when already on the PR branch):
+bugbot-buster --pr current
+# or: bugbot-buster --pr .
+
 # Use Claude Code instead of Codex
 bugbot-buster --pr #123 --ai claude
 
@@ -93,7 +97,7 @@ bugbot-buster --pr #123 --resolve-addressed --dry-run
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `-p, --pr <pr>` | PR to fix (required) | - |
+| `-p, --pr <pr>` | PR to fix (required): `owner/repo#123`, `#123`, or `current`/`.` for current branch | - |
 | `-a, --ai <provider>` | AI provider: `codex` or `claude` | codex |
 | `-i, --interval <min>` | Minutes between checks | 5 |
 | `-m, --max-runs <n>` | Maximum number of runs | 10 |
