@@ -7,10 +7,13 @@ import type { PRComment, PRInfo, CommitInfo } from './types.js';
  */
 export function parsePR(pr: string): PRInfo {
   if (pr === 'current' || pr === '.') {
+    const originalInput = pr;
     try {
       pr = '#' + execSync('gh pr view --json number -q .number', { encoding: 'utf-8' }).trim();
     } catch {
-      throw new Error('Invalid PR format: current. Use owner/repo#123 or #123');
+      throw new Error(
+        `Failed to resolve PR "${originalInput}". No open PR found for current branch. Use owner/repo#123 or #123 instead.`
+      );
     }
   }
 
