@@ -436,7 +436,7 @@ program
   .name('bugbot-buster')
   .description('Automated PR review comment fixer using AI coding assistants')
   .version('0.1.0')
-  .requiredOption('-p, --pr <pr>', 'PR to fix (owner/repo#123 or #123)')
+  .requiredOption('-p, --pr <pr>', 'PR to fix (owner/repo#123, #123, or current/. for current branch)')
   .option('-a, --ai <provider>', 'AI provider: codex or claude', 'codex')
   .option('-i, --interval <minutes>', 'Minutes between checks', '5')
   .option('-m, --max-runs <count>', 'Maximum number of runs', '10')
